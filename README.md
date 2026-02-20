@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/mongoclaw.png" alt="MongoClaw Logo" width="200"/>
+  <img src="https://raw.githubusercontent.com/supreeth-ravi/mongoclaw/main/docs/images/mongoclaw.png" alt="MongoClaw Logo" width="200"/>
 </p>
 
 <h1 align="center">MongoClaw</h1>
@@ -45,7 +45,7 @@ MongoClaw watches your MongoDB collections for changes. When a document is inser
 ## Architecture
 
 <p align="center">
-  <img src="docs/images/mongoclaw_arch.png" alt="MongoClaw Architecture" width="800"/>
+  <img src="https://raw.githubusercontent.com/supreeth-ravi/mongoclaw/main/docs/images/mongoclaw_arch.png" alt="MongoClaw Architecture" width="800"/>
 </p>
 
 ---
