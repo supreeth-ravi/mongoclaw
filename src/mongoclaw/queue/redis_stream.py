@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any
 
 import redis.asyncio as redis
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, TimeoutError as RedisTimeoutError
 
 from mongoclaw.core.exceptions import QueueConnectionError, QueueError
 from mongoclaw.dispatcher.work_item import WorkItem
@@ -172,6 +173,14 @@ class RedisStreamBackend(QueueBackendBase):
                 await self._ensure_consumer_group(stream_name, consumer_group)
                 return []
             raise QueueError(f"Failed to dequeue: {e}")
+
+        except (RedisTimeoutError, asyncio.TimeoutError, TimeoutError):
+            # Normal timeout when no messages available - not an error
+            return []
+
+        except asyncio.CancelledError:
+            # Task cancelled, propagate
+            raise
 
         except Exception as e:
             raise QueueError(f"Failed to dequeue: {e}")

@@ -65,10 +65,10 @@ async def detailed_health_check(
 
     # MongoDB
     try:
-        result = await client.admin.command("ping")
+        await client.admin.command("ping")
         components["mongodb"] = {
             "status": HealthStatus.HEALTHY.value,
-            "details": {"ping": result},
+            "details": {"connected": True},
         }
     except Exception as e:
         components["mongodb"] = {

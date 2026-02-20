@@ -95,7 +95,7 @@ class AsyncMongoClawClient:
         if self._client is None:
             headers = {}
             if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
+                headers["X-API-Key"] = self.api_key
 
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
@@ -191,7 +191,10 @@ class AsyncMongoClawClient:
             Created agent details.
         """
         response = await self._request("POST", "/api/v1/agents", json=config)
-        return AgentDetails(**response.json())
+        data = response.json()
+        # API returns { success: bool, agent: {...} }
+        agent_data = data.get("agent", data)
+        return AgentDetails(**agent_data)
 
     async def update_agent(
         self,
@@ -212,7 +215,10 @@ class AsyncMongoClawClient:
             f"/api/v1/agents/{agent_id}",
             json=config,
         )
-        return AgentDetails(**response.json())
+        data = response.json()
+        # API returns { success: bool, agent: {...} }
+        agent_data = data.get("agent", data)
+        return AgentDetails(**agent_data)
 
     async def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent.

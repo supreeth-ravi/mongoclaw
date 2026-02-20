@@ -99,12 +99,12 @@ class AgentWorker:
         )
 
         while self._running and not shutdown_event.is_set():
-            try:
-                # Process from each stream
-                for stream in self._streams:
-                    if shutdown_event.is_set():
-                        break
+            # Process from each stream - wrap each in try/except to prevent starvation
+            for stream in self._streams:
+                if shutdown_event.is_set():
+                    break
 
+                try:
                     items = await self._queue.dequeue(
                         stream_name=stream,
                         consumer_group=consumer_group,
@@ -123,16 +123,20 @@ class AgentWorker:
                             work_item,
                         )
 
-            except asyncio.CancelledError:
-                break
+                except asyncio.CancelledError:
+                    self._running = False
+                    break
 
-            except Exception as e:
-                logger.exception(
-                    "Worker error",
-                    worker_id=self._worker_id,
-                    error=str(e),
-                )
-                await asyncio.sleep(1)  # Brief pause on error
+                except Exception as e:
+                    # Log error but continue to next stream to prevent starvation
+                    logger.warning(
+                        "Error processing stream",
+                        worker_id=self._worker_id,
+                        stream=stream,
+                        error=str(e),
+                    )
+                    # Brief pause before trying next stream
+                    await asyncio.sleep(0.1)
 
         self._running = False
         logger.info(

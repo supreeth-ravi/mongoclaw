@@ -40,7 +40,7 @@ export class MongoClawClient {
     };
 
     if (options.apiKey) {
-      headers['Authorization'] = `Bearer ${options.apiKey}`;
+      headers['X-API-Key'] = options.apiKey;
     }
 
     this.client = axios.create({

@@ -95,7 +95,7 @@ class MongoClawClient:
         if self._client is None:
             headers = {}
             if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
+                headers["X-API-Key"] = self.api_key
 
             self._client = httpx.Client(
                 base_url=self.base_url,
@@ -191,7 +191,10 @@ class MongoClawClient:
             Created agent details.
         """
         response = self._request("POST", "/api/v1/agents", json=config)
-        return AgentDetails(**response.json())
+        data = response.json()
+        # API returns { success: bool, agent: {...} }
+        agent_data = data.get("agent", data)
+        return AgentDetails(**agent_data)
 
     def update_agent(
         self,
@@ -212,7 +215,10 @@ class MongoClawClient:
             f"/api/v1/agents/{agent_id}",
             json=config,
         )
-        return AgentDetails(**response.json())
+        data = response.json()
+        # API returns { success: bool, agent: {...} }
+        agent_data = data.get("agent", data)
+        return AgentDetails(**agent_data)
 
     def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent.
