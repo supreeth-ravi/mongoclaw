@@ -1,5 +1,5 @@
 {
-  "name": "@mongoclaw/sdk",
+  "name": "mongoclaw",
   "version": "1.0.1",
   "description": "Node.js TypeScript SDK for MongoClaw",
   "main": "dist/index.js",

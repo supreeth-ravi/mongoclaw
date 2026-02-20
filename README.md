@@ -338,7 +338,7 @@ async with AsyncMongoClawClient(base_url="http://localhost:8000") as client:
 Best for: Node.js/TypeScript applications
 
 ```typescript
-import { MongoClawClient } from '@mongoclaw/sdk';
+import { MongoClawClient } from 'mongoclaw';
 
 const client = new MongoClawClient({ baseUrl: 'http://localhost:8000' });
 
