@@ -1,0 +1,76 @@
+# Sentiment Analyzer Agent
+# Analyzes sentiment in customer feedback and reviews
+
+id: sentiment_analyzer
+name: Sentiment Analyzer
+description: |
+  Analyzes customer feedback, reviews, and comments to determine
+  sentiment, emotions, and actionable insights.
+
+watch:
+  database: feedback
+  collection: reviews
+  operations:
+    - insert
+  filter:
+    analyzed:
+      $ne: true
+
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.2
+  max_tokens: 400
+  prompt: |
+    Analyze the sentiment of this customer feedback:
+
+    Product: {{ document.product_name | default('Unknown') }}
+    Rating: {{ document.rating | default('Not provided') }}/5
+
+    Review:
+    {{ document.text }}
+
+    Provide sentiment analysis with:
+    - Overall sentiment (positive/negative/neutral/mixed)
+    - Sentiment score (-1 to 1)
+    - Key emotions detected
+    - Main topics mentioned
+    - Action items for the team
+  response_schema:
+    type: object
+    properties:
+      sentiment:
+        type: string
+        enum: [positive, negative, neutral, mixed]
+      score:
+        type: number
+        minimum: -1
+        maximum: 1
+      emotions:
+        type: array
+        items:
+          type: string
+      topics:
+        type: array
+        items:
+          type: string
+      action_items:
+        type: array
+        items:
+          type: string
+      requires_followup:
+        type: boolean
+    required: [sentiment, score, emotions, topics]
+
+write:
+  strategy: merge
+  target_field: sentiment_analysis
+  idempotency_key: "{{ document._id }}"
+
+execution:
+  max_retries: 3
+  retry_delay_ms: 500
+  timeout_ms: 20000
+  rate_limit_per_minute: 100
+
+enabled: true

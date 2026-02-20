@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mongoclaw
+  labels:
+    app.kubernetes.io/name: mongoclaw
+    app.kubernetes.io/part-of: mongoclaw

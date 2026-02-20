@@ -1,0 +1,23 @@
+apiVersion: v2
+name: mongoclaw
+description: Declarative AI agents framework for MongoDB
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - mongodb
+  - ai
+  - agents
+  - change-streams
+  - llm
+home: https://github.com/your-org/mongoclaw
+sources:
+  - https://github.com/your-org/mongoclaw
+maintainers:
+  - name: MongoClaw Team
+    email: team@mongoclaw.io
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled

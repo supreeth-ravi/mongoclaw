@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mongoclaw
+  namespace: mongoclaw
+  labels:
+    app.kubernetes.io/name: mongoclaw
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mongoclaw
+      app.kubernetes.io/component: server

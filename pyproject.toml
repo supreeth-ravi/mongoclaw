@@ -1,0 +1,117 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mongoclaw"
+version = "1.0.0"
+description = "Declarative AI agents framework for MongoDB with async enrichment via change streams"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Supreeth Ravi", email = "supreeth.ravi@phronetic.ai" }
+]
+keywords = ["mongodb", "ai", "agents", "change-streams", "async", "llm"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # MongoDB
+    "motor>=3.3.0",
+    "pymongo>=4.6.0",
+    # Redis
+    "redis>=5.0.0",
+    # AI
+    "litellm>=1.30.0",
+    "jinja2>=3.1.0",
+    # Web
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    # Config
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "pyyaml>=6.0",
+    # CLI
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    # Resilience
+    "tenacity>=8.2.0",
+    "aiobreaker>=1.2.0",
+    # Observability
+    "structlog>=24.1.0",
+    "prometheus-client>=0.19.0",
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-instrumentation-fastapi>=0.43b0",
+    "opentelemetry-instrumentation-httpx>=0.43b0",
+    # Security
+    "hvac>=2.1.0",
+    "boto3>=1.34.0",
+    "cryptography>=42.0.0",
+    # Utils
+    "msgpack>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "mypy>=1.8.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.6.0",
+    "mongomock-motor>=0.0.29",
+    "fakeredis>=2.21.0",
+]
+
+[project.scripts]
+mongoclaw = "mongoclaw.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/supreeth-ravi/mongoclaw"
+Documentation = "https://github.com/supreeth-ravi/mongoclaw#readme"
+Repository = "https://github.com/supreeth-ravi/mongoclaw"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mongoclaw"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "B", "C4", "UP"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["src/mongoclaw"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

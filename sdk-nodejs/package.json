@@ -1,0 +1,36 @@
+{
+  "name": "@mongoclaw/sdk",
+  "version": "1.0.0",
+  "description": "Node.js TypeScript SDK for MongoClaw",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "jest",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "mongoclaw",
+    "mongodb",
+    "ai",
+    "agents",
+    "sdk"
+  ],
+  "author": "Supreeth Ravi <supreeth.ravi@phronetic.ai>",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

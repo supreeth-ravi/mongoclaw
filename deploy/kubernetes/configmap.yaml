@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongoclaw-config
+  namespace: mongoclaw
+  labels:
+    app.kubernetes.io/name: mongoclaw
+data:
+  MONGOCLAW_ENVIRONMENT: "production"
+  MONGOCLAW_LOG_LEVEL: "INFO"
+  MONGOCLAW_LOG_FORMAT: "json"
+  MONGOCLAW_API_HOST: "0.0.0.0"
+  MONGOCLAW_API_PORT: "8000"
+  MONGOCLAW_WORKER_CONCURRENCY: "10"
+  MONGOCLAW_WORKER_MAX_TASKS_PER_WORKER: "100"
+  MONGOCLAW_METRICS_ENABLED: "true"
+  MONGOCLAW_TRACING_ENABLED: "true"

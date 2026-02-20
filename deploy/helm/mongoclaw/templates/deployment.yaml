@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mongoclaw.fullname" . }}
+  labels:
+    {{- include "mongoclaw.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mongoclaw.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "mongoclaw.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mongoclaw.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.api.port }}
+              protocol: TCP
+          env:
+            - name: MONGOCLAW_ENVIRONMENT
+              value: {{ .Values.config.environment | quote }}
+            - name: MONGOCLAW_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: MONGOCLAW_LOG_FORMAT
+              value: {{ .Values.config.logFormat | quote }}
+            - name: MONGOCLAW_API_HOST
+              value: {{ .Values.config.api.host | quote }}
+            - name: MONGOCLAW_API_PORT
+              value: {{ .Values.config.api.port | quote }}
+            - name: MONGOCLAW_WORKER_CONCURRENCY
+              value: {{ .Values.config.worker.concurrency | quote }}
+            - name: MONGOCLAW_WORKER_MAX_TASKS_PER_WORKER
+              value: {{ .Values.config.worker.maxTasksPerWorker | quote }}
+            - name: MONGOCLAW_METRICS_ENABLED
+              value: {{ .Values.config.metrics.enabled | quote }}
+            - name: MONGOCLAW_TRACING_ENABLED
+              value: {{ .Values.config.tracing.enabled | quote }}
+            {{- if .Values.config.tracing.exporterEndpoint }}
+            - name: MONGOCLAW_TRACING_EXPORTER_ENDPOINT
+              value: {{ .Values.config.tracing.exporterEndpoint | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "mongoclaw.fullname" . }}-secrets
+          {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.agents }}
+            - name: agents-config
+              mountPath: /app/configs/agents
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.agents }}
+        - name: agents-config
+          configMap:
+            name: {{ include "mongoclaw.fullname" . }}-agents
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30

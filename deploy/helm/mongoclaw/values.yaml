@@ -1,0 +1,174 @@
+# Default values for mongoclaw
+
+replicaCount: 2
+
+image:
+  repository: mongoclaw
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: mongoclaw.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: mongoclaw
+          topologyKey: kubernetes.io/hostname
+
+# MongoClaw configuration
+config:
+  environment: production
+  logLevel: INFO
+  logFormat: json
+
+  # Worker settings
+  worker:
+    concurrency: 10
+    maxTasksPerWorker: 100
+
+  # API settings
+  api:
+    host: "0.0.0.0"
+    port: 8000
+
+  # Observability
+  metrics:
+    enabled: true
+  tracing:
+    enabled: true
+    exporterEndpoint: ""
+
+# Secrets configuration
+# NOTE: In production, use external secrets management
+secrets:
+  mongodb:
+    uri: "mongodb://mongodb:27017/mongoclaw?replicaSet=rs0"
+  redis:
+    url: "redis://redis:6379/0"
+  ai:
+    openaiApiKey: ""
+    anthropicApiKey: ""
+  security:
+    apiKeys: []
+
+# External MongoDB (if not using bundled)
+mongodb:
+  enabled: false
+  uri: ""
+
+# Bundled Redis
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Extra environment variables
+extraEnv: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Extra volumes
+extraVolumes: []
+
+# Agent configurations (mounted as ConfigMap)
+agents: {}
+  # ticket_classifier:
+  #   enabled: true
+  #   watch:
+  #     database: support
+  #     collection: tickets
+  #   ai:
+  #     model: gpt-4o-mini
+  #     prompt: "..."

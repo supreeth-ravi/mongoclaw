@@ -1,0 +1,69 @@
+# Ticket Classification Agent
+# Automatically classifies support tickets by category and priority
+
+id: ticket_classifier
+name: Ticket Classifier
+description: |
+  Classifies incoming support tickets by category (billing, technical, sales, other)
+  and priority (low, medium, high, urgent) using AI analysis.
+
+watch:
+  database: support
+  collection: tickets
+  operations:
+    - insert
+  filter:
+    status: open
+    ai_classification:
+      $exists: false
+
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.3
+  max_tokens: 500
+  system_prompt: |
+    You are a support ticket classifier. Analyze tickets and classify them
+    by category and priority. Be consistent and accurate.
+  prompt: |
+    Classify this support ticket:
+
+    Title: {{ document.title }}
+    Description: {{ document.description }}
+    {% if document.customer_tier %}Customer Tier: {{ document.customer_tier }}{% endif %}
+
+    Respond with JSON containing:
+    - category: one of [billing, technical, sales, general]
+    - priority: one of [low, medium, high, urgent]
+    - confidence: a number 0-1 indicating your confidence
+    - reasoning: brief explanation of your classification
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+        enum: [billing, technical, sales, general]
+      priority:
+        type: string
+        enum: [low, medium, high, urgent]
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+      reasoning:
+        type: string
+    required: [category, priority, confidence]
+
+write:
+  strategy: merge
+  target_field: ai_classification
+  idempotency_key: "{{ document._id }}_v1"
+
+execution:
+  max_retries: 3
+  retry_delay_ms: 1000
+  timeout_ms: 30000
+  rate_limit_per_minute: 60
+  cost_limit_usd: 0.10
+
+enabled: true
