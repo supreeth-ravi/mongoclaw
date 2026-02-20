@@ -3,5 +3,5 @@
 from mongoclaw.core.config import Settings
 from mongoclaw.core.exceptions import MongoClawError
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = ["Settings", "MongoClawError", "__version__"]

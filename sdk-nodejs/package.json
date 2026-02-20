@@ -1,6 +1,6 @@
 {
   "name": "mongoclaw",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Node.js TypeScript SDK for MongoClaw",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

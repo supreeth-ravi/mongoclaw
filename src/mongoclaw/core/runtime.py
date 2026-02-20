@@ -110,6 +110,10 @@ class Runtime:
             await self._init_dispatcher()
             await self._init_worker_pool()
 
+            # Start background tasks
+            await self._start_watcher()
+            await self._start_worker_pool()
+
             # Register signal handlers
             self._register_signal_handlers()
 
@@ -264,7 +268,23 @@ class Runtime:
             queue_backend=self._queue_backend,
             agent_store=self._agent_store,
             settings=self._settings,
+            mongo_client=self._mongo_client,
         )
+
+    async def _start_watcher(self) -> None:
+        """Start the change stream watcher."""
+        if self._watcher:
+            logger.debug("Starting change stream watcher")
+            # Set dispatcher on watcher
+            if self._dispatcher:
+                self._watcher.set_dispatcher(self._dispatcher)
+            await self._watcher.start()
+
+    async def _start_worker_pool(self) -> None:
+        """Start the worker pool."""
+        if self._worker_pool:
+            logger.debug("Starting worker pool")
+            await self._worker_pool.start()
 
     async def _stop_worker_pool(self) -> None:
         """Stop worker pool gracefully."""

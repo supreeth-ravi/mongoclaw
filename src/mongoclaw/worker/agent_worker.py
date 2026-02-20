@@ -6,6 +6,8 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
+from motor.motor_asyncio import AsyncIOMotorClient
+
 from mongoclaw.core.config import Settings
 from mongoclaw.core.exceptions import (
     AgentDisabledError,
@@ -42,6 +44,7 @@ class AgentWorker:
         settings: Settings,
         streams: list[str] | None = None,
         executor: Executor | None = None,
+        mongo_client: AsyncIOMotorClient[dict[str, Any]] | None = None,
     ) -> None:
         self._worker_id = worker_id
         self._queue = queue_backend
@@ -52,6 +55,7 @@ class AgentWorker:
         self._executor = executor or Executor(
             agent_store=agent_store,
             settings=settings,
+            mongo_client=mongo_client,
         )
 
         self._running = False

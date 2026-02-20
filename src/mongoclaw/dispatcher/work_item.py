@@ -7,9 +7,26 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from bson import ObjectId
+from bson.timestamp import Timestamp
 from pydantic import BaseModel, Field
 
 from mongoclaw.core.types import ChangeEvent
+
+
+def _make_serializable(obj: Any) -> Any:
+    """Convert MongoDB types to JSON-serializable types."""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, Timestamp):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: _make_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_make_serializable(item) for item in obj]
+    return obj
 
 
 class WorkItem(BaseModel):
@@ -112,9 +129,9 @@ class WorkItem(BaseModel):
         """
         return cls(
             agent_id=agent_id,
-            change_event=event.to_dict(),
-            document=event.full_document or {},
-            document_id=event.document_id,
+            change_event=_make_serializable(event.to_dict()),
+            document=_make_serializable(event.full_document or {}),
+            document_id=str(event.document_id) if event.document_id else "",
             database=event.database,
             collection=event.collection,
             max_attempts=max_attempts,

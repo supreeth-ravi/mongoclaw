@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mongoclaw"
-version = "1.0.1"
+version = "1.0.2"
 description = "Declarative AI agents framework for MongoDB with async enrichment via change streams"
 readme = "README.md"
 license = "MIT"

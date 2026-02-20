@@ -6,6 +6,8 @@ import asyncio
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from motor.motor_asyncio import AsyncIOMotorClient
+
 from mongoclaw.core.config import Settings
 from mongoclaw.dispatcher.routing import RoutingStrategy, get_all_stream_patterns
 from mongoclaw.observability.logging import get_logger
@@ -36,12 +38,14 @@ class WorkerPool:
         settings: Settings,
         pool_size: int | None = None,
         routing_strategy: RoutingStrategy = RoutingStrategy.BY_AGENT,
+        mongo_client: AsyncIOMotorClient[dict[str, Any]] | None = None,
     ) -> None:
         self._queue = queue_backend
         self._agent_store = agent_store
         self._settings = settings
         self._pool_size = pool_size or settings.worker.pool_size
         self._routing_strategy = routing_strategy
+        self._mongo_client = mongo_client
 
         self._pool_id = f"pool-{uuid.uuid4().hex[:8]}"
         self._workers: list[AgentWorker] = []
@@ -97,6 +101,7 @@ class WorkerPool:
                 agent_store=self._agent_store,
                 settings=self._settings,
                 streams=list(self._active_streams),
+                mongo_client=self._mongo_client,
             )
             self._workers.append(worker)
 
@@ -265,6 +270,7 @@ class WorkerPool:
                     agent_store=self._agent_store,
                     settings=self._settings,
                     streams=list(self._active_streams),
+                    mongo_client=self._mongo_client,
                 )
                 self._workers.append(worker)
 

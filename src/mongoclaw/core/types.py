@@ -118,7 +118,7 @@ class ChangeEvent:
             "full_document": self.full_document,
             "update_description": self.update_description,
             "resume_token": self.resume_token,
-            "cluster_time": self.cluster_time.isoformat() if self.cluster_time else None,
+            "cluster_time": str(self.cluster_time) if self.cluster_time else None,
             "wall_time": self.wall_time.isoformat(),
         }
 
@@ -134,7 +134,7 @@ class ChangeEvent:
             update_description=data.get("update_description"),
             resume_token=data.get("resume_token"),
             cluster_time=(
-                datetime.fromisoformat(data["cluster_time"])
+                data["cluster_time"]
                 if data.get("cluster_time")
                 else None
             ),
