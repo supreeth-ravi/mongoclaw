@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -108,6 +108,10 @@ class WriteConfig(BaseModel):
         default=None,
         description="Field mapping from AI response to document fields",
     )
+    target_field: str | None = Field(
+        default=None,
+        description="Optional field to nest AI output under (for merge/replace)",
+    )
     path: str | None = Field(
         default=None,
         description="Nested path for NESTED strategy",
@@ -189,6 +193,56 @@ class ExecutionConfig(BaseModel):
         ge=0,
         description="Deduplication window in seconds",
     )
+    consistency_mode: str = Field(
+        default="eventual",
+        description="Consistency mode: eventual, strict_post_commit, shadow",
+    )
+    max_concurrency: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional in-process per-agent concurrency cap",
+    )
+    require_document_hash_match: bool = Field(
+        default=False,
+        description="Require source document hash to match before writeback in strict mode",
+    )
+
+    @field_validator("consistency_mode")
+    @classmethod
+    def validate_consistency_mode(cls, v: str) -> str:
+        allowed = {"eventual", "strict_post_commit", "shadow"}
+        if v not in allowed:
+            raise ValueError(f"consistency_mode must be one of: {', '.join(sorted(allowed))}")
+        return v
+
+
+class PolicyConfig(BaseModel):
+    """Declarative policy configuration for execution behavior."""
+
+    condition: str | None = Field(
+        default=None,
+        description="Boolean expression over document/result context",
+    )
+    action: Literal["enrich", "block", "tag"] = Field(
+        default="enrich",
+        description="Action when condition matches",
+    )
+    fallback_action: Literal["skip", "enrich"] = Field(
+        default="skip",
+        description="Action when condition does not match",
+    )
+    simulation_mode: bool = Field(
+        default=False,
+        description="If true, evaluate/log policy but skip writeback",
+    )
+    tag_field: str = Field(
+        default="policy_tag",
+        description="Field used when action=tag",
+    )
+    tag_value: str = Field(
+        default="matched",
+        description="Value written when action=tag",
+    )
 
 
 class AgentConfig(BaseModel):
@@ -227,6 +281,10 @@ class AgentConfig(BaseModel):
     execution: ExecutionConfig = Field(
         default_factory=ExecutionConfig,
         description="Execution configuration",
+    )
+    policy: PolicyConfig | None = Field(
+        default=None,
+        description="Optional policy guardrail configuration",
     )
     enabled: bool = Field(
         default=True,

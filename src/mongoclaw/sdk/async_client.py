@@ -43,6 +43,9 @@ class ExecutionRecord(BaseModel):
     agent_id: str
     document_id: str
     status: str
+    lifecycle_state: str | None = None
+    reason: str | None = None
+    written: bool | None = None
     started_at: datetime
     completed_at: datetime | None = None
     duration_ms: float | None = None
@@ -122,6 +125,14 @@ class AsyncMongoClawClient:
         response.raise_for_status()
         return response
 
+    @staticmethod
+    def _unwrap_agent_payload(data: dict[str, Any]) -> dict[str, Any]:
+        """Unwrap API responses of shape {success, agent, message}."""
+        agent_payload = data.get("agent")
+        if isinstance(agent_payload, dict):
+            return agent_payload
+        return data
+
     # Health endpoints
 
     async def health(self) -> HealthStatus:
@@ -192,8 +203,7 @@ class AsyncMongoClawClient:
         """
         response = await self._request("POST", "/api/v1/agents", json=config)
         data = response.json()
-        # API returns { success: bool, agent: {...} }
-        agent_data = data.get("agent", data)
+        agent_data = self._unwrap_agent_payload(data)
         return AgentDetails(**agent_data)
 
     async def update_agent(
@@ -216,8 +226,7 @@ class AsyncMongoClawClient:
             json=config,
         )
         data = response.json()
-        # API returns { success: bool, agent: {...} }
-        agent_data = data.get("agent", data)
+        agent_data = self._unwrap_agent_payload(data)
         return AgentDetails(**agent_data)
 
     async def delete_agent(self, agent_id: str) -> bool:
@@ -242,7 +251,11 @@ class AsyncMongoClawClient:
             Updated agent details.
         """
         response = await self._request("POST", f"/api/v1/agents/{agent_id}/enable")
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        if not isinstance(agent_data, dict) or "id" not in agent_data:
+            return await self.get_agent(agent_id)
+        return AgentDetails(**agent_data)
 
     async def disable_agent(self, agent_id: str) -> AgentDetails:
         """Disable an agent.
@@ -254,7 +267,11 @@ class AsyncMongoClawClient:
             Updated agent details.
         """
         response = await self._request("POST", f"/api/v1/agents/{agent_id}/disable")
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        if not isinstance(agent_data, dict) or "id" not in agent_data:
+            return await self.get_agent(agent_id)
+        return AgentDetails(**agent_data)
 
     async def validate_agent(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate an agent configuration.

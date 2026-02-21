@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from mongoclaw.core.config import Settings
 from mongoclaw.core.types import ChangeEvent
-from mongoclaw.dispatcher.routing import RoutingStrategy, get_stream_name
+from mongoclaw.dispatcher.routing import RoutingStrategy, get_dlq_stream_name, get_stream_name
 from mongoclaw.dispatcher.work_item import WorkItem
 from mongoclaw.observability.logging import get_logger
+from mongoclaw.observability.metrics import get_metrics_collector
 
 if TYPE_CHECKING:
     from mongoclaw.agents.models import AgentConfig
@@ -48,6 +51,11 @@ class AgentDispatcher:
         # Metrics
         self._dispatched_count = 0
         self._deduplicated_count = 0
+        self._dropped_count = 0
+        self._deferred_count = 0
+        self._dlq_count = 0
+        self._forced_enqueue_count = 0
+        self._pressure_cache: dict[str, tuple[float, float]] = {}
 
     async def dispatch(
         self,
@@ -96,10 +104,24 @@ class AgentDispatcher:
             agent=agent,
             work_item=work_item,
             strategy=self._routing_strategy,
+            num_partitions=self._settings.worker.routing_partition_count,
         )
+        self._annotate_delivery_metadata(work_item, stream_name)
+
+        should_enqueue = await self._apply_backpressure_admission(
+            agent=agent,
+            work_item=work_item,
+            stream_name=stream_name,
+        )
+        if not should_enqueue:
+            return None
 
         # Enqueue
         message_id = await self._queue.enqueue(work_item, stream_name)
+        get_metrics_collector().record_dispatch_routed(
+            strategy=self._routing_strategy.value,
+            stream=stream_name,
+        )
 
         logger.info(
             "Dispatched work item",
@@ -134,6 +156,117 @@ class AgentDispatcher:
                 dispatched.append(work_item_id)
 
         return dispatched
+
+    def _annotate_delivery_metadata(self, work_item: WorkItem, stream_name: str) -> None:
+        """Attach explicit delivery/routing semantics to work item metadata."""
+        work_item.metadata["delivery_semantics"] = "at_least_once"
+        work_item.metadata["routing_strategy"] = self._routing_strategy.value
+        work_item.metadata["stream"] = stream_name
+        if stream_name.startswith("mongoclaw:partition:"):
+            try:
+                work_item.metadata["partition"] = int(stream_name.rsplit(":", 1)[1])
+            except ValueError:
+                pass
+
+    async def _apply_backpressure_admission(
+        self,
+        agent: AgentConfig,
+        work_item: WorkItem,
+        stream_name: str,
+    ) -> bool:
+        """Apply priority-aware backpressure policy before enqueue."""
+        worker_settings = self._settings.worker
+        if not worker_settings.dispatch_backpressure_enabled:
+            return True
+
+        threshold = worker_settings.dispatch_backpressure_threshold
+        fullness = await self._get_stream_fullness(stream_name)
+        get_metrics_collector().set_dispatch_queue_fullness(stream_name, fullness)
+        if fullness < threshold:
+            return True
+
+        if work_item.priority >= worker_settings.dispatch_min_priority_when_backpressured:
+            get_metrics_collector().record_dispatch_admission(
+                agent.id,
+                stream_name,
+                "priority_bypass",
+            )
+            logger.info(
+                "Priority bypass under backpressure",
+                agent_id=agent.id,
+                stream=stream_name,
+                priority=work_item.priority,
+                fullness=round(fullness, 3),
+            )
+            return True
+
+        policy = worker_settings.dispatch_overflow_policy
+        if policy == "drop":
+            self._dropped_count += 1
+            get_metrics_collector().record_dispatch_admission(agent.id, stream_name, "drop")
+            logger.warning(
+                "Dropped work item due to backpressure",
+                agent_id=agent.id,
+                stream=stream_name,
+                priority=work_item.priority,
+                fullness=round(fullness, 3),
+            )
+            return False
+
+        if policy == "dlq":
+            self._dlq_count += 1
+            get_metrics_collector().record_dispatch_admission(agent.id, stream_name, "dlq")
+            await self._queue.move_to_dlq(
+                work_item,
+                Exception("Dispatch backpressure overflow"),
+                get_dlq_stream_name(agent),
+            )
+            logger.warning(
+                "Sent work item to DLQ due to backpressure",
+                agent_id=agent.id,
+                stream=stream_name,
+                priority=work_item.priority,
+                fullness=round(fullness, 3),
+            )
+            return False
+
+        self._deferred_count += 1
+        get_metrics_collector().record_dispatch_admission(agent.id, stream_name, "defer")
+        for _ in range(worker_settings.dispatch_defer_max_attempts):
+            await asyncio.sleep(worker_settings.dispatch_defer_seconds)
+            fullness = await self._get_stream_fullness(stream_name)
+            get_metrics_collector().set_dispatch_queue_fullness(stream_name, fullness)
+            if fullness < threshold:
+                return True
+
+        self._forced_enqueue_count += 1
+        get_metrics_collector().record_dispatch_admission(
+            agent.id,
+            stream_name,
+            "defer_forced_enqueue",
+        )
+        logger.warning(
+            "Forced enqueue after defer attempts",
+            agent_id=agent.id,
+            stream=stream_name,
+            priority=work_item.priority,
+            fullness=round(fullness, 3),
+        )
+        return True
+
+    async def _get_stream_fullness(self, stream_name: str) -> float:
+        """Get stream fullness ratio with short cache to reduce Redis calls."""
+        ttl = self._settings.worker.dispatch_pressure_cache_ttl_seconds
+        now = time.monotonic()
+        cached = self._pressure_cache.get(stream_name)
+        if cached and (now - cached[0]) < ttl:
+            return cached[1]
+
+        capacity = max(1, self._settings.redis.stream_max_len)
+        length = await self._queue.get_stream_length(stream_name)
+        fullness = min(1.0, float(length) / float(capacity))
+        self._pressure_cache[stream_name] = (now, fullness)
+        return fullness
 
     def _generate_idempotency_key(
         self,
@@ -171,6 +304,10 @@ class AgentDispatcher:
         return {
             "dispatched_count": self._dispatched_count,
             "deduplicated_count": self._deduplicated_count,
+            "dropped_count": self._dropped_count,
+            "deferred_count": self._deferred_count,
+            "dlq_count": self._dlq_count,
+            "forced_enqueue_count": self._forced_enqueue_count,
             "cache_size": len(self._recent_keys),
             "routing_strategy": self._routing_strategy.value,
         }

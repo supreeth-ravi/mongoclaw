@@ -188,10 +188,16 @@ class WorkerPool:
                 streams.add(pattern)
 
         # Also get agent-specific streams
-        agents = await self._agent_store.list(enabled_only=True)
-        for agent in agents:
-            stream = f"mongoclaw:agent:{agent.id}"
-            streams.add(stream)
+        if self._routing_strategy == RoutingStrategy.BY_AGENT:
+            agents = await self._agent_store.list(enabled_only=True)
+            for agent in agents:
+                stream = f"mongoclaw:agent:{agent.id}"
+                streams.add(stream)
+
+        if self._routing_strategy == RoutingStrategy.PARTITIONED:
+            count = max(1, self._settings.worker.routing_partition_count)
+            for partition in range(count):
+                streams.add(f"mongoclaw:partition:{partition}")
 
         self._active_streams = streams
 

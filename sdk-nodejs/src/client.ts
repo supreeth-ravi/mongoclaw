@@ -62,6 +62,14 @@ export class MongoClawClient {
     throw error;
   }
 
+  private unwrapAgentPayload(data: unknown): AgentDetails {
+    const payload = data as { agent?: AgentDetails | null };
+    if (payload.agent && typeof payload.agent === 'object') {
+      return payload.agent;
+    }
+    return data as AgentDetails;
+  }
+
   // Health endpoints
 
   async health(): Promise<HealthStatus> {
@@ -119,8 +127,8 @@ export class MongoClawClient {
 
   async createAgent(config: Partial<AgentDetails>): Promise<AgentDetails> {
     try {
-      const response = await this.client.post<AgentDetails>('/api/v1/agents', config);
-      return response.data;
+      const response = await this.client.post('/api/v1/agents', config);
+      return this.unwrapAgentPayload(response.data);
     } catch (error) {
       this.handleError(error);
     }
@@ -128,8 +136,8 @@ export class MongoClawClient {
 
   async updateAgent(agentId: string, config: Partial<AgentDetails>): Promise<AgentDetails> {
     try {
-      const response = await this.client.put<AgentDetails>(`/api/v1/agents/${agentId}`, config);
-      return response.data;
+      const response = await this.client.put(`/api/v1/agents/${agentId}`, config);
+      return this.unwrapAgentPayload(response.data);
     } catch (error) {
       this.handleError(error);
     }
@@ -146,8 +154,12 @@ export class MongoClawClient {
 
   async enableAgent(agentId: string): Promise<AgentDetails> {
     try {
-      const response = await this.client.post<AgentDetails>(`/api/v1/agents/${agentId}/enable`);
-      return response.data;
+      const response = await this.client.post(`/api/v1/agents/${agentId}/enable`);
+      const agent = this.unwrapAgentPayload(response.data);
+      if (!agent?.id) {
+        return this.getAgent(agentId);
+      }
+      return agent;
     } catch (error) {
       this.handleError(error);
     }
@@ -155,8 +167,12 @@ export class MongoClawClient {
 
   async disableAgent(agentId: string): Promise<AgentDetails> {
     try {
-      const response = await this.client.post<AgentDetails>(`/api/v1/agents/${agentId}/disable`);
-      return response.data;
+      const response = await this.client.post(`/api/v1/agents/${agentId}/disable`);
+      const agent = this.unwrapAgentPayload(response.data);
+      if (!agent?.id) {
+        return this.getAgent(agentId);
+      }
+      return agent;
     } catch (error) {
       this.handleError(error);
     }

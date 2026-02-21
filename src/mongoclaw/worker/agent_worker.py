@@ -16,6 +16,7 @@ from mongoclaw.core.exceptions import (
 )
 from mongoclaw.dispatcher.work_item import WorkItem, WorkItemResult
 from mongoclaw.observability.logging import get_logger
+from mongoclaw.observability.metrics import get_metrics_collector
 from mongoclaw.worker.executor import Executor
 
 if TYPE_CHECKING:
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
     from mongoclaw.queue.redis_stream import RedisStreamBackend
 
 logger = get_logger(__name__)
+
+_inflight_lock = asyncio.Lock()
+_stream_inflight_counts: dict[str, int] = {}
 
 
 class AgentWorker:
@@ -60,6 +64,10 @@ class AgentWorker:
 
         self._running = False
         self._current_item: WorkItem | None = None
+        self._shutdown_event: asyncio.Event | None = None
+        self._stream_cursor = 0
+        self._pending_sampled_at: dict[str, float] = {}
+        self._empty_cycles_by_stream: dict[str, int] = {}
 
         # Stats
         self._processed_count = 0
@@ -88,6 +96,7 @@ class AgentWorker:
             shutdown_event: Event to signal shutdown.
         """
         self._running = True
+        self._shutdown_event = shutdown_event
         consumer_group = self._settings.redis.consumer_group
         batch_size = self._settings.worker.batch_size
         block_ms = self._settings.redis.block_ms
@@ -99,29 +108,48 @@ class AgentWorker:
         )
 
         while self._running and not shutdown_event.is_set():
+            ordered_streams = self._next_stream_order()
+            stream_count = max(1, len(ordered_streams))
+            effective_block_ms = max(100, block_ms // stream_count)
             # Process from each stream - wrap each in try/except to prevent starvation
-            for stream in self._streams:
+            dequeue_count = self._dequeue_count_for_cycle(batch_size)
+            stream_limit = self._stream_limit_for_cycle(len(ordered_streams))
+            for idx, stream in enumerate(ordered_streams):
+                if idx >= stream_limit:
+                    break
                 if shutdown_event.is_set():
                     break
 
                 try:
+                    await self._sample_stream_pending_if_due(stream, consumer_group)
+                    if await self._is_stream_saturated(stream):
+                        continue
+
                     items = await self._queue.dequeue(
                         stream_name=stream,
                         consumer_group=consumer_group,
                         consumer_name=self._worker_id,
-                        count=batch_size,
-                        block_ms=block_ms,
+                        count=dequeue_count,
+                        block_ms=effective_block_ms,
                     )
+                    if not items:
+                        self._record_empty_cycle(stream)
+                        continue
+                    self._empty_cycles_by_stream[stream] = 0
 
                     for message_id, work_item in items:
                         if shutdown_event.is_set():
                             break
 
-                        await self._process_item(
-                            stream,
-                            message_id,
-                            work_item,
-                        )
+                        await self._increment_stream_inflight(stream)
+                        try:
+                            await self._process_item(
+                                stream,
+                                message_id,
+                                work_item,
+                            )
+                        finally:
+                            await self._decrement_stream_inflight(stream)
 
                 except asyncio.CancelledError:
                     self._running = False
@@ -169,6 +197,8 @@ class AgentWorker:
         }
 
         logger.debug("Processing work item", **log_context)
+        if work_item.attempt > 0:
+            get_metrics_collector().record_replayed_delivery(work_item.agent_id)
 
         try:
             # Execute the work item
@@ -270,8 +300,13 @@ class AgentWorker:
             )
 
             # For simplicity, we re-enqueue immediately
-            # A more sophisticated approach would use scheduled delivery
+            # Delay retries to avoid retry storms under provider pressure.
+            await self._sleep_with_shutdown(delay)
             await self._queue.enqueue(retried_item, stream)
+            get_metrics_collector().record_retry_scheduled(
+                work_item.agent_id,
+                "failure",
+            )
 
         else:
             # Move to dead letter queue
@@ -313,7 +348,13 @@ class AgentWorker:
 
         if work_item.should_retry():
             retried_item = work_item.increment_attempt()
+            delay = self._calculate_retry_delay(retried_item.attempt)
+            await self._sleep_with_shutdown(delay)
             await self._queue.enqueue(retried_item, stream)
+            get_metrics_collector().record_retry_scheduled(
+                work_item.agent_id,
+                "timeout",
+            )
         else:
             from mongoclaw.dispatcher.routing import get_dlq_stream_name
 
@@ -333,6 +374,148 @@ class AgentWorker:
 
         delay = base * (2 ** (attempt - 1))
         return min(delay, max_delay)
+
+    async def _sleep_with_shutdown(self, delay_seconds: float) -> None:
+        """Sleep for retry delay, but exit early if shutdown begins."""
+        if delay_seconds <= 0:
+            return
+        if self._shutdown_event is None:
+            await asyncio.sleep(delay_seconds)
+            return
+        try:
+            await asyncio.wait_for(self._shutdown_event.wait(), timeout=delay_seconds)
+        except asyncio.TimeoutError:
+            return
+
+    def _next_stream_order(self) -> list[str]:
+        """Return streams in rotated order for fair scheduling."""
+        if not self._streams:
+            return []
+
+        if (
+            not self._settings.worker.fair_scheduling_enabled
+            or len(self._streams) == 1
+        ):
+            return list(self._streams)
+
+        cursor = self._stream_cursor % len(self._streams)
+        ordered = self._streams[cursor:] + self._streams[:cursor]
+        self._stream_cursor = (cursor + 1) % len(self._streams)
+        return ordered
+
+    def _dequeue_count_for_cycle(self, batch_size: int) -> int:
+        """Determine dequeue count for each stream in a cycle."""
+        if not self._settings.worker.fair_scheduling_enabled:
+            return batch_size
+        return max(
+            1,
+            min(batch_size, self._settings.worker.fair_stream_batch_size),
+        )
+
+    def _stream_limit_for_cycle(self, stream_count: int) -> int:
+        """Limit number of streams processed in one cycle if configured."""
+        limit = self._settings.worker.fair_streams_per_cycle
+        if limit is None:
+            return stream_count
+        return max(1, min(stream_count, limit))
+
+    async def _is_stream_saturated(self, stream: str) -> bool:
+        """Return True when stream hit the configured in-flight cap."""
+        cap = self._settings.worker.max_in_flight_per_agent_stream
+        if cap is None:
+            return False
+
+        agent_id = self._agent_id_from_stream(stream)
+        if not agent_id:
+            return False
+
+        async with _inflight_lock:
+            current = _stream_inflight_counts.get(stream, 0)
+        if current < cap:
+            return False
+
+        get_metrics_collector().record_agent_stream_saturation_skip(agent_id, stream)
+        logger.debug(
+            "Skipping saturated stream",
+            worker_id=self._worker_id,
+            stream=stream,
+            in_flight=current,
+            cap=cap,
+        )
+        return True
+
+    async def _increment_stream_inflight(self, stream: str) -> None:
+        """Increment in-flight counter for a stream and publish metric."""
+        agent_id = self._agent_id_from_stream(stream)
+        if not agent_id:
+            return
+        async with _inflight_lock:
+            current = _stream_inflight_counts.get(stream, 0) + 1
+            _stream_inflight_counts[stream] = current
+        get_metrics_collector().set_agent_stream_inflight(agent_id, stream, current)
+
+    async def _decrement_stream_inflight(self, stream: str) -> None:
+        """Decrement in-flight counter for a stream and publish metric."""
+        agent_id = self._agent_id_from_stream(stream)
+        if not agent_id:
+            return
+        async with _inflight_lock:
+            current = max(0, _stream_inflight_counts.get(stream, 0) - 1)
+            if current == 0:
+                _stream_inflight_counts.pop(stream, None)
+            else:
+                _stream_inflight_counts[stream] = current
+        get_metrics_collector().set_agent_stream_inflight(agent_id, stream, current)
+
+    async def _sample_stream_pending_if_due(
+        self,
+        stream: str,
+        consumer_group: str,
+    ) -> None:
+        """Sample pending queue depth for agent streams on interval."""
+        agent_id = self._agent_id_from_stream(stream)
+        if not agent_id:
+            return
+
+        interval = self._settings.worker.pending_metrics_interval_seconds
+        now = time.monotonic()
+        last = self._pending_sampled_at.get(stream)
+        if last is not None and (now - last) < interval:
+            return
+
+        self._pending_sampled_at[stream] = now
+        try:
+            pending = await self._queue.get_pending_count(stream, consumer_group)
+            get_metrics_collector().set_agent_stream_pending(agent_id, stream, pending)
+        except Exception:
+            logger.debug(
+                "Failed pending sample",
+                worker_id=self._worker_id,
+                stream=stream,
+            )
+
+    def _record_empty_cycle(self, stream: str) -> None:
+        """Record consecutive empty cycles and emit starvation signals."""
+        agent_id = self._agent_id_from_stream(stream)
+        if not agent_id:
+            return
+
+        cycles = self._empty_cycles_by_stream.get(stream, 0) + 1
+        self._empty_cycles_by_stream[stream] = cycles
+        threshold = self._settings.worker.starvation_cycle_threshold
+        if cycles >= threshold and cycles % threshold == 0:
+            get_metrics_collector().record_agent_stream_starvation_cycle(
+                agent_id,
+                stream,
+            )
+
+    def _agent_id_from_stream(self, stream: str) -> str | None:
+        """Extract agent_id from `mongoclaw:agent:<id>` stream names."""
+        prefix = "mongoclaw:agent:"
+        if not stream.startswith(prefix):
+            return None
+        agent_id = stream[len(prefix):]
+        return agent_id or None
 
     def get_stats(self) -> dict[str, Any]:
         """Get worker statistics."""

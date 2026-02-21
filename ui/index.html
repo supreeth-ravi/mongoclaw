@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MongoClaw Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Declarative AI Execution Layer For MongoDB</p>
+          <h1>MongoClaw Product Console</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="autoRefreshState" class="chip chip-ok">auto: on</span>
+          <button id="refreshButton" class="button button-primary">Refresh</button>
+          <span id="lastUpdated" class="muted">Last updated: never</span>
+        </div>
+      </header>
+
+      <section class="panel config-panel">
+        <div class="field">
+          <label for="baseUrl">API Base URL</label>
+          <input id="baseUrl" type="text" placeholder="http://127.0.0.1:8000" />
+        </div>
+        <div class="field">
+          <label for="apiKey">X-API-Key</label>
+          <input id="apiKey" type="password" placeholder="test-key" />
+        </div>
+        <div class="field">
+          <label for="pollingInterval">Auto Refresh (seconds)</label>
+          <input id="pollingInterval" type="number" min="2" max="120" value="5" />
+        </div>
+        <div class="field">
+          <label for="executionLimit">Execution Rows</label>
+          <input id="executionLimit" type="number" min="10" max="200" value="50" />
+        </div>
+        <div class="field actions">
+          <button id="saveConfigButton" class="button">Save Config</button>
+        </div>
+        <div class="field actions">
+          <button id="connectionTestButton" class="button">Test Connection</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Create New Agent</h2>
+          <p class="muted">Dropdown-first onboarding for new collection agents</p>
+        </div>
+        <div class="quick-create-grid">
+          <div class="field">
+            <label for="qcDatabase">Database</label>
+            <select id="qcDatabase"></select>
+          </div>
+          <div class="field">
+            <label for="qcCollection">Collection</label>
+            <select id="qcCollection"></select>
+          </div>
+          <div class="field">
+            <label for="qcProvider">Provider</label>
+            <select id="qcProvider">
+              <option value="custom">custom</option>
+              <option value="openai">openai</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="qcConsistencyMode">Consistency</label>
+            <select id="qcConsistencyMode">
+              <option value="eventual">eventual</option>
+              <option value="strict_post_commit">strict_post_commit</option>
+              <option value="shadow">shadow</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="qcAgentId">Agent ID</label>
+            <input id="qcAgentId" type="text" placeholder="orders_triage_agent" />
+          </div>
+          <div class="field">
+            <label for="qcAgentName">Agent Name</label>
+            <input id="qcAgentName" type="text" placeholder="Orders Triage Agent" />
+          </div>
+          <div class="field">
+            <label for="qcModel">Model</label>
+            <input id="qcModel" type="text" placeholder="openrouter/openai/gpt-4o-mini" />
+          </div>
+          <div class="field">
+            <label for="qcTargetField">Write Target Field</label>
+            <input id="qcTargetField" type="text" placeholder="ai_triage" />
+          </div>
+          <div class="field field-span-2">
+            <label>Operations</label>
+            <div class="check-row">
+              <label><input type="checkbox" id="opInsert" checked /> insert</label>
+              <label><input type="checkbox" id="opUpdate" checked /> update</label>
+              <label><input type="checkbox" id="opReplace" /> replace</label>
+              <label><input type="checkbox" id="opDelete" /> delete</label>
+            </div>
+          </div>
+          <div class="field field-span-2">
+            <label for="qcFilterJson">Watch Filter JSON (optional)</label>
+            <input id="qcFilterJson" type="text" placeholder='{"status":"new"}' />
+          </div>
+          <div class="field field-span-2">
+            <label for="qcPrompt">Prompt Template</label>
+            <input id="qcPrompt" type="text" placeholder="Classify and return JSON with category, priority, summary. id={{ document._id }}" />
+          </div>
+          <div class="field actions">
+            <button id="qcCreateButton" class="button button-primary">Create Agent</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Existing Agent Editor</h2>
+          <p class="muted">Select existing agent and edit on the fly</p>
+        </div>
+        <div class="agent-editor-grid">
+          <div class="field">
+            <label for="agentSelect">Agent</label>
+            <select id="agentSelect"></select>
+          </div>
+          <div class="actions-inline">
+            <button id="loadAgentButton" class="button">View</button>
+            <button id="updateAgentButton" class="button">Update</button>
+            <button id="deleteAgentButton" class="button button-danger">Delete</button>
+          </div>
+        </div>
+        <textarea id="agentJson" class="code-area" spellcheck="false"></textarea>
+      </section>
+
+      <section class="kpi-grid">
+        <article class="panel stat-card">
+          <p class="label">Health</p>
+          <p id="healthValue" class="value">-</p>
+          <p id="healthDetail" class="muted">waiting</p>
+        </article>
+        <article class="panel stat-card">
+          <p class="label">Agents (Enabled / Total)</p>
+          <p id="agentsValue" class="value">0 / 0</p>
+          <p id="agentsDetail" class="muted">-</p>
+        </article>
+        <article class="panel stat-card">
+          <p class="label">Executions</p>
+          <p id="executionsValue" class="value">0</p>
+          <p id="successRateValue" class="muted">success rate: -</p>
+        </article>
+        <article class="panel stat-card">
+          <p class="label">DLQ / Pending</p>
+          <p id="dlqValue" class="value">0 / 0</p>
+          <p id="retryValue" class="muted">retries: 0</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Collection Explorer</h2>
+          <p class="muted">See schema, applied agents, and enrichment coverage for each collection</p>
+        </div>
+        <div class="explorer-grid">
+          <div class="field">
+            <label for="explorerDatabase">Database</label>
+            <select id="explorerDatabase"></select>
+          </div>
+          <div class="field">
+            <label for="explorerCollection">Collection</label>
+            <select id="explorerCollection"></select>
+          </div>
+          <div class="field">
+            <label for="explorerSampleSize">Schema Sample Size</label>
+            <input id="explorerSampleSize" type="number" min="5" max="200" value="40" />
+          </div>
+          <div class="field actions">
+            <button id="loadCollectionProfileButton" class="button">Load Profile</button>
+          </div>
+        </div>
+        <div id="collectionStats" class="collection-stats"></div>
+        <div id="collectionAgents" class="chips-row"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Types</th>
+                <th>Seen In Samples</th>
+                <th>Example</th>
+              </tr>
+            </thead>
+            <tbody id="schemaTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid-two">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Status Distribution</h2>
+            <p class="muted">From executions stats endpoint</p>
+          </div>
+          <div id="statusBars" class="status-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Resilience Signals</h2>
+            <p class="muted">From Prometheus metrics</p>
+          </div>
+          <dl class="signal-list">
+            <div><dt>Loop Guard Skips</dt><dd id="loopSkips">0</dd></div>
+            <div><dt>Latency SLO Violations</dt><dd id="sloViolations">0</dd></div>
+            <div><dt>Quarantined Agents</dt><dd id="quarantineActive">0</dd></div>
+            <div><dt>Circuit Breakers Open</dt><dd id="openBreakers">0</dd></div>
+            <div><dt>API p95</dt><dd id="apiP95">n/a</dd></div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Agents</h2>
+          <p class="muted">View all agents and jump directly into edit</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Watch</th>
+                <th>Model</th>
+                <th>Tags</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agentsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Recent Executions</h2>
+          <p class="muted">Filter by agent, status, and stats window</p>
+        </div>
+        <div class="execution-filters">
+          <div class="field">
+            <label for="executionAgentFilter">Agent</label>
+            <select id="executionAgentFilter"></select>
+          </div>
+          <div class="field">
+            <label for="executionStatusFilter">Status</label>
+            <select id="executionStatusFilter">
+              <option value="">all</option>
+              <option value="completed">completed</option>
+              <option value="failed">failed</option>
+              <option value="skipped">skipped</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="executionHours">Stats Window (hours)</label>
+            <input id="executionHours" type="number" min="1" max="720" value="24" />
+          </div>
+          <div class="field actions">
+            <button id="applyExecutionFilterButton" class="button">Apply Filters</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Start Time</th>
+                <th>Agent</th>
+                <th>Status</th>
+                <th>Lifecycle</th>
+                <th>Duration (ms)</th>
+                <th>Attempt</th>
+                <th>Written</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="executionsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Events</h2>
+          <p class="muted">Console actions and errors</p>
+        </div>
+        <pre id="eventsLog" class="events-log"></pre>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

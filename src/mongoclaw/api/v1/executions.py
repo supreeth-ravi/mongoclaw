@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -20,6 +20,9 @@ class ExecutionRecord(BaseModel):
     agent_id: str
     document_id: str
     status: str
+    lifecycle_state: str | None = None
+    reason: str | None = None
+    written: bool | None = None
     started_at: datetime
     completed_at: datetime | None = None
     duration_ms: float | None = None
@@ -74,34 +77,6 @@ async def list_executions(
     )
 
 
-@router.get("/{execution_id}")
-async def get_execution(
-    execution_id: str,
-    client: MongoClientDep,
-    settings: SettingsDep,
-    _api_key: ApiKeyDep,
-) -> dict[str, Any]:
-    """Get a specific execution record."""
-    from bson import ObjectId
-
-    db = client[settings.mongodb.database]
-    collection = db[settings.mongodb.executions_collection]
-
-    try:
-        doc = await collection.find_one({"_id": ObjectId(execution_id)})
-    except Exception:
-        doc = await collection.find_one({"_id": execution_id})
-
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Execution '{execution_id}' not found",
-        )
-
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
-
 @router.get("/agent/{agent_id}")
 async def get_agent_executions(
     agent_id: str,
@@ -146,12 +121,8 @@ async def get_execution_stats(
     db = client[settings.mongodb.database]
     collection = db[settings.mongodb.executions_collection]
 
-    cutoff = datetime.utcnow().replace(
-        hour=datetime.utcnow().hour - hours,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
+    bounded_hours = max(1, min(hours, 24 * 30))
+    cutoff = datetime.utcnow() - timedelta(hours=bounded_hours)
 
     match_stage: dict[str, Any] = {"started_at": {"$gte": cutoff}}
     if agent_id:
@@ -172,7 +143,7 @@ async def get_execution_stats(
     results = [doc async for doc in cursor]
 
     stats: dict[str, Any] = {
-        "period_hours": hours,
+        "period_hours": bounded_hours,
         "by_status": {},
         "total": 0,
     }
@@ -186,3 +157,31 @@ async def get_execution_stats(
         stats["total"] += result["count"]
 
     return stats
+
+
+@router.get("/{execution_id}")
+async def get_execution(
+    execution_id: str,
+    client: MongoClientDep,
+    settings: SettingsDep,
+    _api_key: ApiKeyDep,
+) -> dict[str, Any]:
+    """Get a specific execution record."""
+    from bson import ObjectId
+
+    db = client[settings.mongodb.database]
+    collection = db[settings.mongodb.executions_collection]
+
+    try:
+        doc = await collection.find_one({"_id": ObjectId(execution_id)})
+    except Exception:
+        doc = await collection.find_one({"_id": execution_id})
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Execution '{execution_id}' not found",
+        )
+
+    doc["id"] = str(doc.pop("_id"))
+    return doc

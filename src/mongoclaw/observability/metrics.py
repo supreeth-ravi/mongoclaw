@@ -132,6 +132,132 @@ CHANGE_STREAM_LAG = Gauge(
     registry=REGISTRY,
 )
 
+LOOP_GUARD_SKIPS_TOTAL = Counter(
+    "mongoclaw_loop_guard_skips_total",
+    "Total events skipped by loop guard",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+SHADOW_WRITES_SKIPPED_TOTAL = Counter(
+    "mongoclaw_shadow_writes_skipped_total",
+    "Total writebacks skipped due to shadow mode",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+POLICY_DECISIONS_TOTAL = Counter(
+    "mongoclaw_policy_decisions_total",
+    "Total policy decisions",
+    ["agent_id", "action", "matched"],
+    registry=REGISTRY,
+)
+
+AGENT_CONCURRENCY_WAITS_TOTAL = Counter(
+    "mongoclaw_agent_concurrency_waits_total",
+    "Total waits due to per-agent concurrency limits",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+VERSION_CONFLICTS_TOTAL = Counter(
+    "mongoclaw_version_conflicts_total",
+    "Total strict consistency version conflicts",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+RETRIES_SCHEDULED_TOTAL = Counter(
+    "mongoclaw_retries_scheduled_total",
+    "Total retry attempts scheduled",
+    ["agent_id", "reason"],
+    registry=REGISTRY,
+)
+
+HASH_CONFLICTS_TOTAL = Counter(
+    "mongoclaw_hash_conflicts_total",
+    "Total strict document-hash conflicts",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+AGENT_STREAM_PENDING = Gauge(
+    "mongoclaw_agent_stream_pending",
+    "Pending queue items per agent stream",
+    ["agent_id", "stream"],
+    registry=REGISTRY,
+)
+
+AGENT_STREAM_INFLIGHT = Gauge(
+    "mongoclaw_agent_stream_inflight",
+    "In-flight work items per agent stream",
+    ["agent_id", "stream"],
+    registry=REGISTRY,
+)
+
+AGENT_STREAM_STARVATION_CYCLES_TOTAL = Counter(
+    "mongoclaw_agent_stream_starvation_cycles_total",
+    "Consecutive empty-read starvation signals per agent stream",
+    ["agent_id", "stream"],
+    registry=REGISTRY,
+)
+
+AGENT_STREAM_SATURATION_SKIPS_TOTAL = Counter(
+    "mongoclaw_agent_stream_saturation_skips_total",
+    "Times a stream was skipped due to in-flight cap",
+    ["agent_id", "stream"],
+    registry=REGISTRY,
+)
+
+DISPATCH_ADMISSION_TOTAL = Counter(
+    "mongoclaw_dispatch_admission_total",
+    "Dispatch admission decisions under backpressure control",
+    ["agent_id", "stream", "decision"],
+    registry=REGISTRY,
+)
+
+DISPATCH_QUEUE_FULLNESS = Gauge(
+    "mongoclaw_dispatch_queue_fullness",
+    "Dispatch-time queue fullness ratio (0-1)",
+    ["stream"],
+    registry=REGISTRY,
+)
+
+DISPATCH_ROUTED_TOTAL = Counter(
+    "mongoclaw_dispatch_routed_total",
+    "Total dispatched work items by routing strategy and stream",
+    ["strategy", "stream"],
+    registry=REGISTRY,
+)
+
+REPLAYED_DELIVERIES_TOTAL = Counter(
+    "mongoclaw_replayed_deliveries_total",
+    "Total replayed deliveries (attempt > 0), reflects at-least-once behavior",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+AGENT_QUARANTINE_EVENTS_TOTAL = Counter(
+    "mongoclaw_agent_quarantine_events_total",
+    "Number of times agents entered temporary quarantine",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+AGENT_QUARANTINE_ACTIVE = Gauge(
+    "mongoclaw_agent_quarantine_active",
+    "Whether an agent is currently quarantined (0/1)",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
+AGENT_LATENCY_SLO_VIOLATIONS_TOTAL = Counter(
+    "mongoclaw_agent_latency_slo_violations_total",
+    "Number of executions exceeding configured latency SLO",
+    ["agent_id"],
+    registry=REGISTRY,
+)
+
 # Circuit breaker metrics
 CIRCUIT_BREAKER_STATE = Gauge(
     "mongoclaw_circuit_breaker_state",
@@ -278,6 +404,102 @@ class MetricsCollector:
         CHANGE_EVENTS_TOTAL.labels(
             database=database, collection=collection, operation=operation
         ).inc()
+
+    def record_loop_guard_skip(self, agent_id: str) -> None:
+        """Record a loop guard skip event."""
+        LOOP_GUARD_SKIPS_TOTAL.labels(agent_id=agent_id).inc()
+
+    def record_shadow_write_skip(self, agent_id: str) -> None:
+        """Record a shadow-mode writeback skip."""
+        SHADOW_WRITES_SKIPPED_TOTAL.labels(agent_id=agent_id).inc()
+
+    def record_policy_decision(
+        self,
+        agent_id: str,
+        action: str,
+        matched: bool,
+    ) -> None:
+        """Record a policy evaluation decision."""
+        POLICY_DECISIONS_TOTAL.labels(
+            agent_id=agent_id,
+            action=action,
+            matched="true" if matched else "false",
+        ).inc()
+
+    def record_agent_concurrency_wait(self, agent_id: str) -> None:
+        """Record a wait on per-agent concurrency cap."""
+        AGENT_CONCURRENCY_WAITS_TOTAL.labels(agent_id=agent_id).inc()
+
+    def record_version_conflict(self, agent_id: str) -> None:
+        """Record a strict-consistency version conflict."""
+        VERSION_CONFLICTS_TOTAL.labels(agent_id=agent_id).inc()
+
+    def record_retry_scheduled(self, agent_id: str, reason: str) -> None:
+        """Record a scheduled retry event."""
+        RETRIES_SCHEDULED_TOTAL.labels(agent_id=agent_id, reason=reason).inc()
+
+    def record_hash_conflict(self, agent_id: str) -> None:
+        """Record a strict hash conflict."""
+        HASH_CONFLICTS_TOTAL.labels(agent_id=agent_id).inc()
+
+    def set_agent_stream_pending(self, agent_id: str, stream: str, count: int) -> None:
+        """Set pending depth for an agent stream."""
+        AGENT_STREAM_PENDING.labels(agent_id=agent_id, stream=stream).set(count)
+
+    def set_agent_stream_inflight(self, agent_id: str, stream: str, count: int) -> None:
+        """Set in-flight count for an agent stream."""
+        AGENT_STREAM_INFLIGHT.labels(agent_id=agent_id, stream=stream).set(count)
+
+    def record_agent_stream_starvation_cycle(self, agent_id: str, stream: str) -> None:
+        """Record a starvation signal for an agent stream."""
+        AGENT_STREAM_STARVATION_CYCLES_TOTAL.labels(
+            agent_id=agent_id,
+            stream=stream,
+        ).inc()
+
+    def record_agent_stream_saturation_skip(self, agent_id: str, stream: str) -> None:
+        """Record a skip due to per-stream in-flight saturation."""
+        AGENT_STREAM_SATURATION_SKIPS_TOTAL.labels(
+            agent_id=agent_id,
+            stream=stream,
+        ).inc()
+
+    def record_dispatch_admission(
+        self,
+        agent_id: str,
+        stream: str,
+        decision: str,
+    ) -> None:
+        """Record dispatch admission outcome."""
+        DISPATCH_ADMISSION_TOTAL.labels(
+            agent_id=agent_id,
+            stream=stream,
+            decision=decision,
+        ).inc()
+
+    def set_dispatch_queue_fullness(self, stream: str, fullness: float) -> None:
+        """Set dispatch-time stream fullness."""
+        DISPATCH_QUEUE_FULLNESS.labels(stream=stream).set(fullness)
+
+    def record_dispatch_routed(self, strategy: str, stream: str) -> None:
+        """Record routing decision for a dispatched work item."""
+        DISPATCH_ROUTED_TOTAL.labels(strategy=strategy, stream=stream).inc()
+
+    def record_replayed_delivery(self, agent_id: str) -> None:
+        """Record replayed delivery for at-least-once semantics visibility."""
+        REPLAYED_DELIVERIES_TOTAL.labels(agent_id=agent_id).inc()
+
+    def record_agent_quarantine_event(self, agent_id: str) -> None:
+        """Record that an agent entered quarantine."""
+        AGENT_QUARANTINE_EVENTS_TOTAL.labels(agent_id=agent_id).inc()
+
+    def set_agent_quarantine_active(self, agent_id: str, active: bool) -> None:
+        """Set whether an agent is actively quarantined."""
+        AGENT_QUARANTINE_ACTIVE.labels(agent_id=agent_id).set(1 if active else 0)
+
+    def record_agent_latency_slo_violation(self, agent_id: str) -> None:
+        """Record an execution that violated latency SLO."""
+        AGENT_LATENCY_SLO_VIOLATIONS_TOTAL.labels(agent_id=agent_id).inc()
 
     def set_change_stream_lag(
         self,

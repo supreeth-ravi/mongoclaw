@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -55,6 +56,14 @@ class WorkItem(BaseModel):
     document_id: str = Field(
         default="",
         description="Document _id as string",
+    )
+    source_version: int | None = Field(
+        default=None,
+        description="Observed _mongoclaw_version at dispatch time",
+    )
+    source_document_hash: str | None = Field(
+        default=None,
+        description="Dispatch-time hash of the source document",
     )
     database: str = Field(
         default="",
@@ -132,6 +141,8 @@ class WorkItem(BaseModel):
             change_event=_make_serializable(event.to_dict()),
             document=_make_serializable(event.full_document or {}),
             document_id=str(event.document_id) if event.document_id else "",
+            source_version=_extract_source_version(event.full_document),
+            source_document_hash=_extract_source_document_hash(event.full_document),
             database=event.database,
             collection=event.collection,
             max_attempts=max_attempts,
@@ -194,6 +205,8 @@ class WorkItemResult(BaseModel):
     success: bool
     ai_response: dict[str, Any] | None = None
     written: bool = False
+    lifecycle_state: str = "completed"
+    reason: str = "completed"
     error: str | None = None
     error_type: str | None = None
     duration_ms: float = 0.0
@@ -207,6 +220,8 @@ class WorkItemResult(BaseModel):
         ai_response: dict[str, Any] | None = None,
         written: bool = False,
         duration_ms: float = 0.0,
+        lifecycle_state: str = "completed",
+        reason: str = "completed",
     ) -> WorkItemResult:
         """Create a success result."""
         return cls(
@@ -217,6 +232,8 @@ class WorkItemResult(BaseModel):
             written=written,
             duration_ms=duration_ms,
             attempt=work_item.attempt,
+            lifecycle_state=lifecycle_state,
+            reason=reason,
         )
 
     @classmethod
@@ -225,6 +242,8 @@ class WorkItemResult(BaseModel):
         work_item: WorkItem,
         error: Exception,
         duration_ms: float = 0.0,
+        lifecycle_state: str = "failed",
+        reason: str = "failed",
     ) -> WorkItemResult:
         """Create a failure result."""
         return cls(
@@ -235,4 +254,51 @@ class WorkItemResult(BaseModel):
             error_type=type(error).__name__,
             duration_ms=duration_ms,
             attempt=work_item.attempt,
+            lifecycle_state=lifecycle_state,
+            reason=reason,
         )
+
+
+def _extract_source_version(full_document: dict[str, Any] | None) -> int | None:
+    """Extract dispatch-time version stamp from a full document."""
+    if not isinstance(full_document, dict):
+        return None
+
+    raw = full_document.get("_mongoclaw_version")
+    if raw is None:
+        return 0
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_source_document_hash(full_document: dict[str, Any] | None) -> str | None:
+    """Create dispatch-time source hash used by optional strict guard."""
+    if not isinstance(full_document, dict):
+        return None
+    normalized = _normalize_for_hash(_make_serializable(full_document))
+    serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _normalize_for_hash(document: dict[str, Any]) -> dict[str, Any]:
+    """Normalize document for stable hashing."""
+    ignored = {"_ai_metadata", "_mongoclaw_version"}
+    normalized: dict[str, Any] = {}
+    for key, value in document.items():
+        if key in ignored:
+            continue
+        normalized[key] = _normalize_value(value)
+    return normalized
+
+
+def _normalize_value(value: Any) -> Any:
+    """Normalize values recursively for hashing."""
+    if isinstance(value, dict):
+        return _normalize_for_hash(value)
+    if isinstance(value, list):
+        return [_normalize_value(v) for v in value]
+    return value
