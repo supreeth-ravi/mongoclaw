@@ -46,7 +46,7 @@ class AIConfig(BaseModel):
 
     provider: str = Field(
         default="openai",
-        description="AI provider name (openai, anthropic, etc.)",
+        description="AI provider name (openai, anthropic, external, etc.)",
     )
     model: str = Field(
         default="gpt-4o-mini",
@@ -85,7 +85,7 @@ class AIConfig(BaseModel):
     )
     extra_params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional provider-specific parameters",
+        description="Additional provider-specific parameters (e.g., external_url for external provider)",
     )
 
 

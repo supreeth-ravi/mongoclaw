@@ -239,7 +239,15 @@ class MongoClawClient:
             True if deleted successfully.
         """
         response = self._request("DELETE", f"/api/v1/agents/{agent_id}")
-        return response.status_code == 204
+        if response.status_code in (200, 202, 204):
+            return True
+
+        # Fallback for non-standard success payloads.
+        try:
+            data = response.json()
+            return bool(data.get("success"))
+        except Exception:
+            return False
 
     def enable_agent(self, agent_id: str) -> AgentDetails:
         """Enable an agent.

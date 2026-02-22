@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import httpx
 import litellm
 from litellm import acompletion
 from litellm.exceptions import (
@@ -77,6 +78,7 @@ class ProviderRouter:
         max_tokens: int | None = None,
         response_format: str | None = None,
         api_key: str | None = None,
+        provider: str | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """
@@ -104,6 +106,18 @@ class ProviderRouter:
 
         # Check cost limits
         self._check_limits()
+
+        requested_provider = (provider or "").strip().lower()
+        if requested_provider == "external":
+            return await self._complete_external(
+                model=model,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                **kwargs,
+            )
 
         # Build messages
         messages = []
@@ -243,6 +257,148 @@ class ProviderRouter:
                 provider=self._get_provider_from_model(model),
                 model=model,
             )
+
+    async def _complete_external(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str | None,
+        temperature: float | None,
+        max_tokens: int | None,
+        response_format: str | None,
+        **kwargs: Any,
+    ) -> AIResponse:
+        """Call an external agent endpoint instead of a direct LLM provider."""
+        external_url = kwargs.pop("external_url", None) or kwargs.pop("external_agent_url", None)
+        if not isinstance(external_url, str) or not external_url.strip():
+            raise AIProviderError(
+                "external provider requires ai.extra_params.external_url",
+                provider="external",
+                model=model,
+            )
+
+        timeout_seconds = kwargs.pop("external_timeout_seconds", self._settings.ai.request_timeout)
+        auth_token = kwargs.pop("external_auth_token", None)
+        auth_header = kwargs.pop("external_auth_header", "Authorization")
+        extra_headers = kwargs.pop("external_headers", None)
+        external_agent_id = kwargs.pop("external_agent_id", model)
+
+        payload: dict[str, Any] = {
+            "agent_id": external_agent_id,
+            "model": model,
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "temperature": temperature if temperature is not None else self._settings.ai.default_temperature,
+            "max_tokens": max_tokens if max_tokens is not None else self._settings.ai.default_max_tokens,
+            "response_format": response_format,
+            "metadata": kwargs,
+        }
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if isinstance(extra_headers, dict):
+            headers.update({str(k): str(v) for k, v in extra_headers.items()})
+        if auth_token and isinstance(auth_header, str):
+            if auth_header.lower() == "authorization":
+                headers[auth_header] = f"Bearer {auth_token}"
+            else:
+                headers[auth_header] = str(auth_token)
+
+        start_time = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(float(timeout_seconds))) as client:
+                response = await client.post(external_url, json=payload, headers=headers)
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise AIProviderError(
+                f"External agent returned HTTP {exc.response.status_code}",
+                provider="external",
+                model=model,
+            ) from exc
+        except Exception as exc:
+            raise AIProviderError(
+                f"External agent call failed: {exc}",
+                provider="external",
+                model=model,
+            ) from exc
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        content = self._extract_external_content(body)
+        usage = self._extract_external_usage(body)
+        finish_reason = self._extract_external_finish_reason(body)
+
+        prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+        completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+        total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens) or 0)
+        cost = float(usage.get("cost_usd", 0.0) or 0.0)
+
+        self._total_tokens += total_tokens
+        self._total_cost += cost
+        self._request_count += 1
+
+        logger.info(
+            "External agent completion successful",
+            model=model,
+            provider="external",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost,
+            latency_ms=round(latency_ms, 2),
+        )
+
+        return AIResponse(
+            content=content,
+            model=str(body.get("model") or model),
+            provider="external",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+            raw_response=body if isinstance(body, dict) else {"raw": body},
+        )
+
+    def _extract_external_content(self, body: Any) -> str:
+        """Extract content from a generic external-agent response."""
+        if not isinstance(body, dict):
+            return str(body)
+        if isinstance(body.get("content"), str):
+            return body["content"]
+        if isinstance(body.get("output"), str):
+            return body["output"]
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                message = first.get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    return message["content"]
+                if isinstance(first.get("text"), str):
+                    return first["text"]
+        return str(body)
+
+    def _extract_external_usage(self, body: Any) -> dict[str, Any]:
+        """Extract usage fields from external-agent response."""
+        if not isinstance(body, dict):
+            return {}
+        usage = body.get("usage")
+        if isinstance(usage, dict):
+            return usage
+        return {}
+
+    def _extract_external_finish_reason(self, body: Any) -> str:
+        """Extract finish reason from external-agent response."""
+        if not isinstance(body, dict):
+            return "stop"
+        if isinstance(body.get("finish_reason"), str):
+            return body["finish_reason"]
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict) and isinstance(first.get("finish_reason"), str):
+                return first["finish_reason"]
+        return "stop"
 
     def _check_limits(self) -> None:
         """Check if cost or token limits are exceeded."""

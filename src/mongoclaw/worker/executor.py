@@ -319,6 +319,7 @@ class Executor:
 
         response = await self._provider_router.complete(
             model=ai_config.model,
+            provider=ai_config.provider,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=ai_config.temperature,

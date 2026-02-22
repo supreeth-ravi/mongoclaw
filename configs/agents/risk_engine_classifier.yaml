@@ -1,0 +1,25 @@
+id: risk_engine_classifier
+name: Risk Engine Classifier
+
+watch:
+  database: lending
+  collection: applications
+  operations: [insert, update]
+
+ai:
+  provider: custom
+  model: openrouter/openai/gpt-4o-mini
+  prompt: |
+    Classify lending risk:
+    {{ document | tojson }}
+
+write:
+  strategy: merge
+  target_field: risk_assessment
+
+execution:
+  consistency_mode: strict_post_commit
+  require_document_hash_match: true
+  max_retries: 1
+
+enabled: true

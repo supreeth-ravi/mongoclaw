@@ -1,0 +1,32 @@
+id: fraud_scoring_external
+name: Fraud Scoring (External)
+
+watch:
+  database: payments
+  collection: transactions
+  operations: [insert]
+
+ai:
+  provider: external
+  model: fraud_agent_v2
+  prompt: |
+    Evaluate fraud risk for:
+    {{ document | tojson }}
+  response_schema:
+    type: object
+    properties:
+      risk_score: { type: number }
+      risk_level: { type: string }
+      reasons:
+        type: array
+        items: { type: string }
+  extra_params:
+    external_url: https://agents.example.com/fraud/run
+    external_auth_token: YOUR_TOKEN
+    external_auth_header: Authorization
+
+write:
+  strategy: merge
+  target_field: fraud
+
+enabled: true

@@ -1,0 +1,27 @@
+id: aml_screening
+name: AML Screening
+
+watch:
+  database: compliance
+  collection: transfers
+  operations: [insert]
+
+ai:
+  provider: external
+  model: aml_agent
+  prompt: |
+    Perform AML screening:
+    {{ document | tojson }}
+  extra_params:
+    external_url: https://agents.example.com/compliance/aml
+    external_auth_token: YOUR_TOKEN
+
+write:
+  strategy: merge
+  target_field: aml
+
+execution:
+  max_retries: 2
+  timeout_seconds: 45
+
+enabled: true

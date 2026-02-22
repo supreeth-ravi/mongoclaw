@@ -43,6 +43,7 @@ class AIProvider(str, Enum):
     OLLAMA = "ollama"
     TOGETHER = "together"
     CUSTOM = "custom"
+    EXTERNAL = "external"
 
 
 class ExecutionStatus(str, Enum):

@@ -1,0 +1,25 @@
+id: crm_lead_router
+name: CRM Lead Router
+
+watch:
+  database: crm
+  collection: leads
+  operations: [insert]
+  filter:
+    status: new
+
+ai:
+  provider: custom
+  model: openrouter/openai/gpt-4o-mini
+  prompt: |
+    Route this lead and return JSON:
+    - segment
+    - intent
+    - priority
+    {{ document | tojson }}
+
+write:
+  strategy: merge
+  target_field: routing
+
+enabled: true

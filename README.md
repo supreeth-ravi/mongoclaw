@@ -7,7 +7,7 @@
 <h3 align="center"><em>A Clawbot army for every collection</em></h3>
 
 <p align="center">
-  <strong>Declarative AI agents framework for MongoDB</strong><br>
+  <strong>Event-driven AI mutation runtime for MongoDB</strong><br>
   Automatically enrich documents with AI using change streams
 </p>
 
@@ -26,11 +26,11 @@ MongoClaw watches your MongoDB collections for changes. When a document is inser
 **The workflow is simple:**
 
 ```
-1. You define an "agent" in YAML (what to watch, what AI prompt to use, where to write results)
+1. You define your MongoClaw agent, or bring your existing external agent, and configure what collection to watch and where to write results
 2. MongoClaw watches MongoDB using change streams
 3. When a matching document arrives, it queues it for processing
-4. Workers call the AI model with your prompt + document data
-5. AI response is parsed and written back to the document
+4. Workers execute enrichment using the configured provider (direct model call or external agent endpoint)
+5. Response is parsed and written back to the document
 ```
 
 **Example use cases:**
@@ -39,6 +39,129 @@ MongoClaw watches your MongoDB collections for changes. When a document is inser
 - Extract entities from customer feedback
 - Analyze sentiment in reviews
 - Tag and categorize products
+
+---
+
+## Problem
+
+Production teams want AI enrichment in operational databases, but most implementations become fragile quickly:
+
+- Custom change-stream consumers per use case
+- Ad hoc retry/error handling and no DLQ discipline
+- Inconsistent prompt/version control across teams
+- Weak observability for latency, failures, and cost
+- Hard migration path when moving from direct LLM calls to external/internal agents
+
+MongoClaw addresses this by turning enrichment into a declarative, managed runtime and control plane.
+
+## Solution
+
+MongoClaw provides a declarative agent model for MongoDB enrichment:
+
+- Watch MongoDB change streams
+- Route matching events into resilient queues
+- Execute enrichment through direct LLM providers or external agent endpoints
+- Parse/validate responses
+- Write results back with idempotency and execution audit trails
+
+This gives you one consistent control plane for enrichment workloads across teams.
+
+## Core Features
+
+- Declarative agent configs (YAML/JSON)
+- MongoDB change-stream driven processing
+- Redis Streams queueing with consumer groups
+- Multiple execution providers:
+  - Direct LLM providers via LiteLLM
+  - External agent provider (`ai.provider=external`)
+- Prompt templating (Jinja2) with structured response parsing
+- Write strategies (`merge`, `replace`, `append`, `nested`)
+- Idempotency and deduplication controls
+- Agent-level execution controls (timeouts, retries, priority, concurrency caps)
+- CLI, REST API, Python SDK, Node SDK
+
+## Scale & Reliability
+
+- Worker pool with configurable concurrency
+- Backpressure-aware dispatch controls
+- Fair stream scheduling and starvation metrics
+- Retry with exponential backoff
+- Dead-letter queue support for unrecoverable work
+- Resume-token handling for change-stream continuity
+- Throughput benchmarked and observable via metrics endpoints
+
+## Security & Governance
+
+- API key authentication (`X-API-Key`)
+- Pluggable secrets backends (env, Vault, AWS)
+- Optional PII redaction and audit logging controls
+- Policy evaluation layer (`enrich`, `block`, `tag`, simulation mode)
+- Execution metadata persisted for traceability
+
+## Cost Governance (Current Support)
+
+MongoClaw already captures cost/usage telemetry, but not every budget-control shape is enforced yet.
+
+| Capability | Status | Notes |
+|---|---|---|
+| Budget caps (global runtime) | Supported now | `MONGOCLAW_AI__GLOBAL_COST_LIMIT_USD` and `MONGOCLAW_AI__GLOBAL_TOKEN_LIMIT` stop new AI calls when process-level limit is reached |
+| Cost-per-agent cap enforcement | Not yet enforced | `execution.cost_limit_usd` exists in agent schema today but is not enforced at runtime yet |
+| Cost-per-collection cap enforcement | Not yet enforced | Can be approximated using execution history and metrics labels, but no native hard cap yet |
+| Observed spend metrics | Supported now | Prometheus `mongoclaw_ai_cost_usd_total` + execution metadata (`_ai_metadata.cost_usd`) |
+
+This means MongoClaw is already usable for spend observability and global kill-switch limits, with finer-grained budget policy as the next governance layer.
+
+## Policy-As-Code (Current Support)
+
+Current policy configuration is expression-based:
+
+```yaml
+policy:
+  condition: "document.status == 'restricted'"
+  action: block
+  fallback_action: enrich
+  simulation_mode: false
+```
+
+Supported actions today:
+- `enrich`
+- `block`
+- `tag`
+- `simulation_mode` (evaluate and report, skip writeback)
+
+## Enterprise Readiness
+
+- Works with existing MongoDB/Redis infrastructure
+- Docker/Kubernetes/Helm deployment options
+- Prometheus metrics and structured logging
+- Versioned agent configs with runtime enable/disable
+- Runtime guardrails that can evolve into AI data governance policy layers
+- Clear migration path:
+  - start with direct model calls
+  - move to external/internal agent endpoints without changing watch/write topology
+
+## High-Impact Use Cases
+
+MongoClaw is especially useful where asynchronous enrichment must be reliable and auditable.  
+That has direct implications for:
+
+- Fraud systems
+- Risk engines
+- CRM automation
+- Content pipelines
+- Marketplace moderation
+- Financial compliance systems
+
+## Agent Examples By Domain
+
+Example YAMLs are in `configs/agents/`:
+
+- `configs/agents/fraud_scoring_external.yaml`
+- `configs/agents/risk_engine_classifier.yaml`
+- `configs/agents/crm_lead_router.yaml`
+- `configs/agents/content_enricher.yaml`
+- `configs/agents/listing_moderation.yaml`
+- `configs/agents/aml_screening.yaml`
 
 ---
 
@@ -94,6 +217,41 @@ docker exec mongo mongosh --eval "rs.initiate()"
 
 # Start Redis
 docker run -d --name redis -p 6379:6379 redis:7-alpine
+```
+
+**Option C: Use Your Existing MongoDB + Redis**
+
+If you already run MongoDB/Redis, you can skip Docker infra and point MongoClaw to your existing services.
+
+Requirements for existing MongoDB:
+
+- Replica set enabled (required for change streams)
+- MongoDB user with read/write permissions on:
+  - watched databases/collections
+  - MongoClaw metadata collections (`agents`, `executions`, `resume_tokens`, etc.)
+
+Set environment variables:
+
+```bash
+# Existing MongoDB (must include replicaSet)
+MONGOCLAW_MONGODB__URI=mongodb://<user>:<pass>@<mongo-host>:27017/mongoclaw?replicaSet=<rs-name>
+
+# Existing Redis
+MONGOCLAW_REDIS__URL=redis://<redis-host>:6379/0
+
+# API auth keys (comma-separated allowed)
+MONGOCLAW_SECURITY__API_KEYS=test-key
+
+# AI defaults (if using direct LLM providers)
+MONGOCLAW_AI__DEFAULT_MODEL=openrouter/openai/gpt-4o-mini
+OPENROUTER_API_KEY=sk-or-...
+```
+
+Then run only MongoClaw:
+
+```bash
+mongoclaw test connection
+mongoclaw server start
 ```
 
 ### Step 2: Configure Environment
@@ -178,6 +336,45 @@ write:
 enabled: true
 ```
 
+If you already have an external agent service, create an external-agent config instead:
+
+```yaml
+id: ticket_classifier_external
+name: Ticket Classifier (External Agent)
+
+watch:
+  database: support
+  collection: tickets
+  operations: [insert]
+  filter:
+    status: open
+
+ai:
+  provider: external
+  model: customer_enrichment_agent
+  prompt: |
+    Enrich this support ticket:
+    {{ document | tojson }}
+  response_schema:
+    type: object
+    properties:
+      category: { type: string }
+      priority: { type: string }
+      summary: { type: string }
+  extra_params:
+    external_url: https://agents.example.com/run
+    external_auth_token: YOUR_TOKEN
+    external_auth_header: Authorization
+    external_agent_id: customer_enrichment_agent
+    external_timeout_seconds: 60
+
+write:
+  strategy: merge
+  target_field: ai_classification
+
+enabled: true
+```
+
 ### Step 5: Register the Agent
 
 ```bash
@@ -228,7 +425,23 @@ db.tickets.findOne({ title: "Can't access my account" })
 
 ## How to Use MongoClaw
 
-There are 3 ways to interact with MongoClaw:
+There are 4 ways to interact with MongoClaw:
+
+### Important Runtime Model
+
+
+Process:
+
+1. Start infra (MongoDB + Redis)
+2. Start MongoClaw server (`mongoclaw server start`)
+3. Run client code (CLI, Python SDK, or Node SDK) with:
+   - `base_url` -> where server is running
+   - `api_key` -> your configured API key
+
+Example local values:
+
+- `base_url`: `http://127.0.0.1:8000`
+- `api_key`: any key configured via `MONGOCLAW_SECURITY__API_KEYS` (example: `test-key`)
 
 ### 1. CLI (Command Line)
 
@@ -300,7 +513,10 @@ Best for: Python applications, scripts, automation
 from mongoclaw.sdk import MongoClawClient
 
 # Initialize client
-client = MongoClawClient(base_url="http://localhost:8000")
+client = MongoClawClient(
+    base_url="http://localhost:8000",
+    api_key="test-key",  # required when API keys are enabled
+)
 
 # List agents
 agents = client.list_agents()
@@ -325,6 +541,9 @@ if client.is_healthy():
     print("MongoClaw is running!")
 ```
 
+The script above **calls** an already-running MongoClaw server.  
+It does not start MongoClaw server by itself.
+
 **Async version:**
 ```python
 from mongoclaw.sdk import AsyncMongoClawClient
@@ -332,6 +551,15 @@ from mongoclaw.sdk import AsyncMongoClawClient
 async with AsyncMongoClawClient(base_url="http://localhost:8000") as client:
     agents = await client.list_agents()
 ```
+
+**Python SDK capability map:**
+
+- Health: `health`, `health_detailed`, `is_healthy`
+- Agent lifecycle: `list_agents`, `get_agent`, `create_agent`, `update_agent`, `enable_agent`, `disable_agent`, `delete_agent`, `validate_agent`
+- Execution visibility: `list_executions`, `get_execution`, `wait_for_execution`
+- Metrics access: `get_metrics`
+- Optional/route-dependent methods: `retry_execution`, `trigger_agent`, `get_agent_stats`
+  (available only if corresponding API routes are enabled in your server build)
 
 ### 4. Node.js SDK
 
@@ -355,6 +583,70 @@ await client.createAgent({
 });
 ```
 
+Like Python SDK, Node SDK is an HTTP client and does not start server/runtime.
+
+---
+
+## SDK Testing Playbook (Developer)
+
+This section is the recommended way to showcase and validate MongoClaw SDK behavior before release.
+
+### 1. Test environment requirements
+
+- MongoDB with replica set enabled
+- Redis reachable from runtime
+- MongoClaw runtime running (`mongoclaw server start`)
+- API reachable (`/health`, `/health/detailed`)
+- API key configured if auth is enabled (`X-API-Key`)
+- AI provider key configured and tested (`mongoclaw test ai`)
+
+### 2. Minimum release gate (must pass)
+
+1. SDK health checks and auth flow
+2. Agent CRUD lifecycle (create/list/get/update/enable/disable/delete)
+3. End-to-end enrichment from MongoDB insert -> AI -> MongoDB writeback
+4. Execution audit visibility from SDK (`list_executions`)
+5. Retry behavior on transient failures
+6. Throughput baseline with fixed prompt/model profile
+
+### 3. Advanced scenario matrix (recommended)
+
+| Scenario | Why it matters | Expected result |
+|---|---|---|
+| Insert + rapid updates on same doc before enrichment | Detect stale writeback risk | In `eventual`, stale output may appear |
+| `deduplicate=true` vs `false` under rapid updates | Validate idempotency window behavior | Fewer duplicate effective writes when enabled |
+| `strict_post_commit` on same race workload | Prevent stale final writes | Stale writes suppressed (`strict_version_conflict` / `hash_conflict`) |
+| Same-doc stress with `max_concurrency=1` vs higher | Understand ordering/concurrency effects | Compare stale rate + execution volume |
+| Idempotency replay (duplicate payload/event) | Validate duplicate protection | Duplicate execution should be skipped from writeback |
+| Failure + retry + recovery | Validate resilience | Initial failures, then successful completion after fix |
+| DLQ path (`max_retries=0` or repeated failures) | Validate dead-letter safety net | Failed item reaches DLQ and can be retried manually |
+| Policy: `block`, `tag`, `simulation_mode` | Validate guardrail behavior | Write blocked/tagged/simulated per policy |
+| Burst load + backpressure metrics | Validate admission control observability | Dispatch/admission metrics reflect pressure decisions |
+| Mixed-priority load | Validate priority bypass behavior | High-priority items admitted first when pressure is active |
+| Multi-agent same collection, different target fields | Validate composition | Both fields enriched without overwrite |
+| Multi-agent same target field | Validate conflict semantics | Last-writer-wins unless field partitioning is used |
+| Agent disable/enable during traffic | Validate operational controls | Disabled: no writes; Enabled: writes resume |
+| Webhook-triggered vs change-stream-triggered execution | Validate trigger parity | Same output schema + lifecycle expectations |
+| Benchmarks at 100/500/1000 docs | Capacity planning | Track completion ratio and docs/sec at fixed window |
+
+### 4. Baseline SDK e2e script pattern
+
+For every scenario script, capture these fields in output:
+
+- `scenario`, `run_id`, `agent_id`
+- `inserted`, `enriched`, `failed`, `skipped`
+- `execution_count`, `status_counts`, `reason_counts`
+- `elapsed_s`, `throughput_docs_per_s`
+- For race tests: `final_seq`, `ai_seen_seq`, `stale_final_ai`
+- For DLQ tests: `dlq_before`, `dlq_after`, `dlq_delta`, `recovery_result`
+
+### 5. Reporting format (recommended for PRs/releases)
+
+- Summary table: pass/fail/skip by scenario
+- Raw metrics snapshot: throughput, completion ratio, error reasons
+- Notes on unsupported routes in the active deployment profile
+- Config used for run: model, prompt size, worker pool size, retry settings
+
 ---
 
 ## Agent Configuration Reference
@@ -375,7 +667,7 @@ watch:
 
 # AI configuration
 ai:
-  provider: openai            # openai, anthropic, openrouter, etc.
+  provider: openai            # openai, anthropic, openrouter, external, etc.
   model: gpt-4o-mini          # Model identifier
   prompt: |                   # Jinja2 template
     Process this document:
@@ -389,6 +681,13 @@ ai:
     properties:
       result:
         type: string
+  extra_params:               # Optional provider-specific params
+    # For provider=external:
+    # external_url: https://agents.example.com/run
+    # external_auth_token: YOUR_TOKEN
+    # external_auth_header: Authorization
+    # external_agent_id: customer_enrichment_agent
+    # external_timeout_seconds: 60
 
 # How to write results back
 write:
@@ -403,11 +702,36 @@ execution:
   retry_delay_seconds: 1.0
   timeout_seconds: 60
   rate_limit_requests: 100    # Per minute
-  cost_limit_usd: 10.0        # Per hour
+  cost_limit_usd: 10.0        # Planned per-agent limit (field exists; runtime enforcement not enabled yet)
 
 # Enable/disable
 enabled: true
 ```
+
+### External Agent Provider (No Direct LLM Call)
+
+If you already have an external agent service for enrichment, use:
+
+```yaml
+ai:
+  provider: external
+  model: customer_enrichment_agent
+  prompt: |
+    Enrich this document:
+    {{ document | tojson }}
+  extra_params:
+    external_url: https://agents.example.com/run
+    external_auth_token: YOUR_TOKEN
+    external_auth_header: Authorization
+    external_agent_id: customer_enrichment_agent
+    external_timeout_seconds: 60
+```
+
+The external endpoint should return one of:
+
+- `content` (string), or
+- `output` (string), or
+- OpenAI-style `choices[0].message.content`
 
 ---
 
@@ -502,6 +826,13 @@ mongoclaw/
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Planned
+
+- Per-agent runtime budget enforcement for `execution.cost_limit_usd` and token limits
+- Per-collection budget caps for shared workloads
+- Structured policy DSL (`policy.when`) with field/operator/value rules
+- Richer spend rollups in API (agent, collection, and time-window views)
 
 ## Author
 

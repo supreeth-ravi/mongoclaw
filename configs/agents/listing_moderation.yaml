@@ -1,0 +1,25 @@
+id: listing_moderation
+name: Listing Moderation
+
+watch:
+  database: marketplace
+  collection: listings
+  operations: [insert, update]
+
+ai:
+  provider: custom
+  model: openrouter/openai/gpt-4o-mini
+  prompt: |
+    Check for policy violations:
+    {{ document | tojson }}
+
+policy:
+  condition: "document.category in ['weapons', 'adult']"
+  action: block
+  fallback_action: enrich
+
+write:
+  strategy: merge
+  target_field: moderation
+
+enabled: true
