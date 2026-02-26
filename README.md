@@ -63,7 +63,7 @@ MongoClaw is designed to reduce this class of risk when AI touches live data:
 - Policy layer:
   `enrich` / `block` / `tag` actions with conditions and simulation mode.
 
-This means you still get AI enrichment, but with explicit operational controls expected in production data systems.
+This means you still get AI enrichment, but with explicit, production-oriented operational controls.
 
 ---
 
@@ -164,7 +164,7 @@ MongoClaw is built to run real AI enrichment workflows on MongoDB collections:
 
 ## What’s New (Latest Runtime Features)
 
-Recent updates added production-focused execution controls:
+Recent updates added production-oriented execution controls:
 
 - Deterministic strict mode:
   `strict_post_commit` now enforces optimistic version checks and increments `_mongoclaw_version` atomically.
@@ -205,9 +205,9 @@ Then open `http://127.0.0.1:4173`, set API URL (for example `http://127.0.0.1:80
 
 ---
 
-## Tested Scenarios (Production-Like)
+## Tested Scenarios (Production-Oriented)
 
-The platform has been exercised with production-like scenarios across:
+The platform has been exercised with production-oriented scenarios across:
 
 - CLI, Python SDK, and Node SDK agent lifecycle and enrichment flows
 - Loop-guard behavior and replay-safety controls
