@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">MongoClaw Capabilities</title>
+  <desc id="desc">Capability overview for MongoClaw including trigger, execution, safety, policy, and interfaces.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #dbe3ef; stroke-width: 2; rx: 18; }
+      .h1 { font: 700 36px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .h2 { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0b3a67; }
+      .txt { font: 500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1e293b; }
+      .dot { fill: #0ea5e9; }
+      .chip { fill: #e0f2fe; stroke: #7dd3fc; stroke-width: 1.5; rx: 10; }
+      .chipTxt { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #075985; }
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1200" height="760"/>
+  <text class="h1" x="60" y="70">MongoClaw Capabilities</text>
+  <rect class="chip" x="900" y="35" width="240" height="36"/>
+  <text class="chipTxt" x="920" y="59">Declarative AI for MongoDB</text>
+
+  <rect class="panel" x="60" y="110" width="520" height="280"/>
+  <text class="h2" x="90" y="150">Trigger + Processing</text>
+  <circle class="dot" cx="95" cy="180" r="5"/><text class="txt" x="115" y="186">Change stream triggers (insert, update, replace, delete)</text>
+  <circle class="dot" cx="95" cy="216" r="5"/><text class="txt" x="115" y="222">Collection filters and operation matching</text>
+  <circle class="dot" cx="95" cy="252" r="5"/><text class="txt" x="115" y="258">Template prompts + schema-based AI outputs</text>
+  <circle class="dot" cx="95" cy="288" r="5"/><text class="txt" x="115" y="294">Write strategies: merge, replace, append, nested</text>
+  <circle class="dot" cx="95" cy="324" r="5"/><text class="txt" x="115" y="330">Target-field writeback (for clean AI payload nesting)</text>
+  <circle class="dot" cx="95" cy="360" r="5"/><text class="txt" x="115" y="366">CLI, REST API, Python SDK, and Node SDK parity</text>
+
+  <rect class="panel" x="620" y="110" width="520" height="280"/>
+  <text class="h2" x="650" y="150">Reliability + Safety</text>
+  <circle class="dot" cx="655" cy="180" r="5"/><text class="txt" x="675" y="186">Loop guard with source-agent metadata tracking</text>
+  <circle class="dot" cx="655" cy="216" r="5"/><text class="txt" x="675" y="222">Idempotency key support for duplicate event protection</text>
+  <circle class="dot" cx="655" cy="252" r="5"/><text class="txt" x="675" y="258">Consistency modes: eventual, strict_post_commit, shadow</text>
+  <circle class="dot" cx="655" cy="288" r="5"/><text class="txt" x="675" y="294">Per-agent concurrency limits for isolation</text>
+  <circle class="dot" cx="655" cy="324" r="5"/><text class="txt" x="675" y="330">Retry and DLQ handling for failed work items</text>
+  <circle class="dot" cx="655" cy="360" r="5"/><text class="txt" x="675" y="366">Prometheus metrics for queue, policy, loop and shadow paths</text>
+
+  <rect class="panel" x="60" y="430" width="1080" height="260"/>
+  <text class="h2" x="90" y="470">Policy Engine</text>
+  <circle class="dot" cx="95" cy="500" r="5"/><text class="txt" x="115" y="506">Declarative conditions on document and AI result fields</text>
+  <circle class="dot" cx="95" cy="536" r="5"/><text class="txt" x="115" y="542">Actions: enrich, block, tag</text>
+  <circle class="dot" cx="95" cy="572" r="5"/><text class="txt" x="115" y="578">Fallback actions and simulation mode for safer rollouts</text>
+  <circle class="dot" cx="95" cy="608" r="5"/><text class="txt" x="115" y="614">Use cases: fraud gates, compliance tags, moderation controls</text>
+
+  <rect class="chip" x="760" y="520" width="340" height="44"/>
+  <text class="chipTxt" x="780" y="548">condition -> action -> deterministic write behavior</text>
+</svg>

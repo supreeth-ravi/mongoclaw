@@ -1,0 +1,27 @@
+id: method_phase2_agent
+name: Method Phase2 Agent
+watch:
+  database: support_phase2
+  collection: tickets
+  operations: [insert]
+  filter:
+    status: open
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Classify:
+    {{ document.title }}
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+      priority:
+        type: string
+    required: [category, priority]
+  extra_params:
+    mock_response: '{"category":"throughput","priority":"low"}'
+write:
+  strategy: merge
+enabled: true

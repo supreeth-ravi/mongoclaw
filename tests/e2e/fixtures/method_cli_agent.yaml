@@ -1,0 +1,29 @@
+id: method_cli_agent
+name: Method CLI Agent
+watch:
+  database: support_cli
+  collection: tickets
+  operations: [insert]
+  filter:
+    status: open
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Classify this support ticket:
+    Title: {{ document.title }}
+    Description: {{ document.description }}
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+      priority:
+        type: string
+    required: [category, priority]
+  extra_params:
+    mock_response: '{"category":"technical","priority":"high"}'
+write:
+  strategy: merge
+  target_field: ai_classification
+enabled: true

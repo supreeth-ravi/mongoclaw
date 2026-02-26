@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter
+from bson import ObjectId
 
 from mongoclaw.api.dependencies import AgentStoreDep, ApiKeyDep, MongoClientDep
 
@@ -30,6 +32,19 @@ def _value_type(value: Any) -> str:
     return type(value).__name__
 
 
+def _sanitize_value(value: Any) -> Any:
+    """Convert BSON/non-JSON-native values to JSON-safe primitives."""
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_sanitize_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _sanitize_value(v) for k, v in value.items()}
+    return value
+
+
 def _flatten_fields(
     doc: dict[str, Any],
     out: dict[str, dict[str, Any]],
@@ -48,7 +63,7 @@ def _flatten_fields(
             if isinstance(value, (dict, list)):
                 entry["example"] = _value_type(value)
             else:
-                entry["example"] = value
+                entry["example"] = _sanitize_value(value)
         if isinstance(value, dict):
             _flatten_fields(value, out, path, depth + 1, max_depth)
 
@@ -117,7 +132,7 @@ async def get_collection_profile(
         "ai_triage": 1,
     }
     cursor = col.find({}, projection=projection).sort("_id", -1).limit(10)
-    recent = [doc async for doc in cursor]
+    recent = [_sanitize_value(doc) async for doc in cursor]
 
     sample_cursor = col.find({}, projection=None).limit(bounded_sample_size)
     sampled = [doc async for doc in sample_cursor]

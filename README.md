@@ -7,8 +7,8 @@
 <h3 align="center"><em>A Clawbot army for every collection</em></h3>
 
 <p align="center">
-  <strong>Event-driven AI mutation runtime for MongoDB</strong><br>
-  Automatically enrich documents with AI using change streams
+  <strong>Declarative AI Execution Layer for MongoDB</strong><br>
+  Run controlled, observable AI workflows directly on MongoDB change events
 </p>
 
 <p align="center">
@@ -42,126 +42,82 @@ MongoClaw watches your MongoDB collections for changes. When a document is inser
 
 ---
 
-## Problem
+## Why This Matters (Real Incident Pattern)
 
-Production teams want AI enrichment in operational databases, but most implementations become fragile quickly:
+In July 2025, public reports described an AI coding assistant incident where production database data was deleted and responses were unreliable during recovery/debug flows.  
+References:
+- https://www.theregister.com/2025/07/21/replit_saastr_vibe_coding_incident/
+- https://www.sfgate.com/tech/article/bay-area-tech-product-rogue-ceo-apology-20780833.php
 
-- Custom change-stream consumers per use case
-- Ad hoc retry/error handling and no DLQ discipline
-- Inconsistent prompt/version control across teams
-- Weak observability for latency, failures, and cost
-- Hard migration path when moving from direct LLM calls to external/internal agents
+MongoClaw is designed to reduce this class of risk when AI touches live data:
+- Separation of concerns:
+  AI agents are declarative and scoped per collection/event, not unrestricted code execution.
+- Controlled writeback:
+  Explicit `write` strategies and target fields avoid arbitrary destructive updates.
+- Deterministic guards:
+  `strict_post_commit`, version checks, and optional hash checks prevent stale/unsafe writes.
+- Loop and replay safety:
+  Loop-guard metadata, idempotency controls, retries, and DLQ handling.
+- Observability first:
+  Execution history + reason codes + metrics for conflicts/timeouts/retries.
+- Policy layer:
+  `enrich` / `block` / `tag` actions with conditions and simulation mode.
 
-MongoClaw addresses this by turning enrichment into a declarative, managed runtime and control plane.
+This means you still get AI enrichment, but with explicit operational controls expected in production data systems.
 
-## Solution
+---
 
-MongoClaw provides a declarative agent model for MongoDB enrichment:
+## 60-Second Golden Path
 
-- Watch MongoDB change streams
-- Route matching events into resilient queues
-- Execute enrichment through direct LLM providers or external agent endpoints
-- Parse/validate responses
-- Write results back with idempotency and execution audit trails
-
-This gives you one consistent control plane for enrichment workloads across teams.
-
-## Core Features
-
-- Declarative agent configs (YAML/JSON)
-- MongoDB change-stream driven processing
-- Redis Streams queueing with consumer groups
-- Multiple execution providers:
-  - Direct LLM providers via LiteLLM
-  - External agent provider (`ai.provider=external`)
-- Prompt templating (Jinja2) with structured response parsing
-- Write strategies (`merge`, `replace`, `append`, `nested`)
-- Idempotency and deduplication controls
-- Agent-level execution controls (timeouts, retries, priority, concurrency caps)
-- CLI, REST API, Python SDK, Node SDK
-
-## Scale & Reliability
-
-- Worker pool with configurable concurrency
-- Backpressure-aware dispatch controls
-- Fair stream scheduling and starvation metrics
-- Retry with exponential backoff
-- Dead-letter queue support for unrecoverable work
-- Resume-token handling for change-stream continuity
-- Throughput benchmarked and observable via metrics endpoints
-
-## Security & Governance
-
-- API key authentication (`X-API-Key`)
-- Pluggable secrets backends (env, Vault, AWS)
-- Optional PII redaction and audit logging controls
-- Policy evaluation layer (`enrich`, `block`, `tag`, simulation mode)
-- Execution metadata persisted for traceability
-
-## Cost Governance (Current Support)
-
-MongoClaw already captures cost/usage telemetry, but not every budget-control shape is enforced yet.
-
-| Capability | Status | Notes |
-|---|---|---|
-| Budget caps (global runtime) | Supported now | `MONGOCLAW_AI__GLOBAL_COST_LIMIT_USD` and `MONGOCLAW_AI__GLOBAL_TOKEN_LIMIT` stop new AI calls when process-level limit is reached |
-| Cost-per-agent cap enforcement | Not yet enforced | `execution.cost_limit_usd` exists in agent schema today but is not enforced at runtime yet |
-| Cost-per-collection cap enforcement | Not yet enforced | Can be approximated using execution history and metrics labels, but no native hard cap yet |
-| Observed spend metrics | Supported now | Prometheus `mongoclaw_ai_cost_usd_total` + execution metadata (`_ai_metadata.cost_usd`) |
-
-This means MongoClaw is already usable for spend observability and global kill-switch limits, with finer-grained budget policy as the next governance layer.
-
-## Policy-As-Code (Current Support)
-
-Current policy configuration is expression-based:
-
-```yaml
-policy:
-  condition: "document.status == 'restricted'"
-  action: block
-  fallback_action: enrich
-  simulation_mode: false
+### 1) Start infra
+```bash
+docker compose up -d
 ```
 
-Supported actions today:
-- `enrich`
-- `block`
-- `tag`
-- `simulation_mode` (evaluate and report, skip writeback)
+### 2) Start MongoClaw
+```bash
+MONGOCLAW_MONGODB__URI="mongodb://localhost:27017/mongoclaw?replicaSet=rs0" \
+MONGOCLAW_REDIS__URL="redis://localhost:6379/0" \
+uv run mongoclaw server start --host 127.0.0.1 --port 8000
+```
 
-## Enterprise Readiness
+### 3) Create one agent (CLI)
+```bash
+uv run mongoclaw agents create -f configs/agents/ticket_classifier.yaml
+```
 
-- Works with existing MongoDB/Redis infrastructure
-- Docker/Kubernetes/Helm deployment options
-- Prometheus metrics and structured logging
-- Versioned agent configs with runtime enable/disable
-- Runtime guardrails that can evolve into AI data governance policy layers
-- Clear migration path:
-  - start with direct model calls
-  - move to external/internal agent endpoints without changing watch/write topology
+### 4) Insert one document and see writeback
+```bash
+mongosh "mongodb://localhost:27017/support?replicaSet=rs0" --eval '
+db.tickets.insertOne({
+  title: "Refund not received",
+  description: "Paid 3 days ago, no refund yet",
+  status: "open"
+})'
+```
 
-## High-Impact Use Cases
+Then verify:
+- Document has AI output field(s)
+- Document has `_ai_metadata`
+- Execution appears in `/api/v1/executions`
 
-MongoClaw is especially useful where asynchronous enrichment must be reliable and auditable.  
-That has direct implications for:
+---
 
-- Fraud systems
-- Risk engines
-- CRM automation
-- Content pipelines
-- Marketplace moderation
-- Financial compliance systems
+## Choosing Consistency Mode
 
-## Agent Examples By Domain
+Use this as the default decision guide:
 
-Example YAMLs are in `configs/agents/`:
+- `eventual`:
+  Best for high-volume enrichment where coverage/throughput matter most.
+- `strict_post_commit`:
+  Best for correctness-sensitive workflows (financial/compliance) where stale writes must be blocked.
+- `shadow`:
+  Best for validation and rollout safety; execute AI path but skip writeback.
 
-- `configs/agents/fraud_scoring_external.yaml`
-- `configs/agents/risk_engine_classifier.yaml`
-- `configs/agents/crm_lead_router.yaml`
-- `configs/agents/content_enricher.yaml`
-- `configs/agents/listing_moderation.yaml`
-- `configs/agents/aml_screening.yaml`
+Practical rule:
+- Start new agents in `shadow`
+- Move to `eventual` for scale-centric enrichment
+- Use `strict_post_commit` only where deterministic safety is required and lower coverage under high churn is acceptable
 
 ---
 
@@ -246,6 +202,22 @@ python3 -m http.server 4173
 ```
 
 Then open `http://127.0.0.1:4173`, set API URL (for example `http://127.0.0.1:8000`) and your `X-API-Key`.
+
+---
+
+## Tested Scenarios (Production-Like)
+
+The platform has been exercised with production-like scenarios across:
+
+- CLI, Python SDK, and Node SDK agent lifecycle and enrichment flows
+- Loop-guard behavior and replay-safety controls
+- Stream fairness under concurrent traffic
+- Shadow mode write-skip validation
+- Metrics and observability endpoint checks
+- Policy actions (`enrich`, `block`, `tag`) and rule evaluation
+- Isolation controls and agent-level concurrency limits
+- Strict post-commit consistency and determinism safeguards
+- High-scale and burst workloads with retries/timeouts and DLQ thresholds
 
 ---
 

@@ -71,7 +71,7 @@ class TestAgentStore:
 
         updated_config = sample_agent_config.copy()
         updated_config["name"] = "Updated Name"
-        updated = await agent_store.update(config.id, AgentConfig(**updated_config))
+        updated = await agent_store.update(AgentConfig(**updated_config))
 
         assert updated.name == "Updated Name"
 

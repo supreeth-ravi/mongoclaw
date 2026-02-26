@@ -1,0 +1,37 @@
+{
+  "id": "method_py_agent",
+  "name": "Method Python Agent",
+  "watch": {
+    "database": "support_py",
+    "collection": "tickets",
+    "operations": ["insert"],
+    "filter": {
+      "status": "open"
+    }
+  },
+  "ai": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "prompt": "Classify: {{ document.title }} / {{ document.description }}",
+    "response_schema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        }
+      },
+      "required": ["category", "priority"]
+    },
+    "extra_params": {
+      "mock_response": "{\"category\":\"billing\",\"priority\":\"urgent\"}"
+    }
+  },
+  "write": {
+    "strategy": "merge",
+    "target_field": "ai_classification"
+  },
+  "enabled": true
+}

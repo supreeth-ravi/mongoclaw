@@ -1,0 +1,29 @@
+id: method_isolation_agent
+name: Method Isolation Agent
+watch:
+  database: support_isolation
+  collection: tickets
+  operations: [insert]
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Classify:
+    Title: {{ document.title }}
+    Description: {{ document.description }}
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+      priority:
+        type: string
+    required: [category, priority]
+  extra_params:
+    mock_response: '{"category":"isolated","priority":"normal"}'
+write:
+  strategy: merge
+  target_field: ai_classification
+execution:
+  max_concurrency: 1
+enabled: true
