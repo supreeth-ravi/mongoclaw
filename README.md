@@ -173,6 +173,82 @@ Example YAMLs are in `configs/agents/`:
 
 ---
 
+## Capabilities
+
+MongoClaw is built to run real AI enrichment workflows on MongoDB collections:
+
+- Declarative agents:
+  Define agents in YAML/JSON with `watch`, `ai`, `write`, `execution`, and optional `policy` blocks.
+- Change stream triggers:
+  React to `insert`, `update`, `replace`, and `delete` events with collection-level filters.
+- Structured AI output:
+  Use response schemas and template-driven prompts for predictable fields.
+- Flexible writeback:
+  `merge`, `replace`, `append`, `nested`, and `target_field` output patterns.
+- Idempotent writes:
+  Optional idempotency keys and metadata tracking for duplicate-event safety.
+- Loop protection:
+  Agent-origin metadata avoids same-agent retrigger cascades.
+- Consistency controls:
+  `eventual`, `strict_post_commit`, and `shadow` execution modes.
+- Policy-driven actions:
+  Evaluate conditions and apply `enrich`, `block`, or `tag` actions with fallback behavior.
+- Runtime isolation:
+  Per-agent concurrency caps to reduce noisy-neighbor impact.
+- Observability:
+  `/metrics` endpoint with execution, queue, loop guard, shadow mode, policy, and API metrics.
+- Interfaces:
+  CLI, REST API, Python SDK, and Node SDK support for the same agent model.
+
+<p align="center">
+  <img src="docs/images/mongoclaw_capabilities.svg" alt="MongoClaw capabilities overview" width="960"/>
+</p>
+
+---
+
+## What’s New (Latest Runtime Features)
+
+Recent updates added production-focused execution controls:
+
+- Deterministic strict mode:
+  `strict_post_commit` now enforces optimistic version checks and increments `_mongoclaw_version` atomically.
+- Optional source hash guard:
+  `execution.require_document_hash_match` can block stale writes when document content changed.
+- Execution lifecycle persistence:
+  Execution records now persist `status`, `lifecycle_state`, `reason`, and `written` for auditability.
+- Fair scheduling and stream isolation:
+  Rotating stream order, per-stream dequeue caps, and optional in-flight cap per agent stream.
+- Dispatch backpressure admission:
+  Queue-pressure aware dispatch with priority bypass and overflow policy (`drop`, `defer`, `dlq`).
+- Horizontal-scale routing controls:
+  Env-driven routing strategy (`by_agent`, `by_collection`, `single`, `partitioned`, `by_priority`) and partition count.
+- Failure isolation and SLO metrics:
+  Per-agent failure budgets with temporary quarantine and latency SLO violation counters.
+
+---
+
+## Operations UI (Live Dashboard)
+
+MongoClaw now includes a lightweight operations console at `/ui` in this repo for real-time visibility.
+
+It provides:
+- Health status from `/health` and `/health/detailed`
+- Agent inventory and controls (enable/disable/validate)
+- Live execution feed from `/api/v1/executions`
+- 24h status distribution from `/api/v1/executions/stats`
+- Resilience metrics from `/metrics` (DLQ, retries, loop guard, quarantine, circuit breakers)
+
+Run it locally:
+
+```bash
+cd ui
+python3 -m http.server 4173
+```
+
+Then open `http://127.0.0.1:4173`, set API URL (for example `http://127.0.0.1:8000`) and your `X-API-Key`.
+
+---
+
 ## Prerequisites
 
 Before using MongoClaw, you need:
@@ -421,6 +497,10 @@ db.tickets.findOne({ title: "Can't access my account" })
 }
 ```
 
+<p align="center">
+  <img src="docs/images/mongoclaw_before_after.svg" alt="Before vs after MongoClaw enrichment" width="960"/>
+</p>
+
 ---
 
 ## How to Use MongoClaw
@@ -493,6 +573,8 @@ API is available at `http://localhost:8000`:
 | POST | `/api/v1/agents/{id}/disable` | Disable agent |
 | GET | `/api/v1/executions` | List execution history |
 | GET | `/metrics` | Prometheus metrics |
+
+Execution records include `status`, `lifecycle_state`, `reason`, and `written` so you can distinguish successful writes vs deterministic skips/conflicts.
 
 **Example:**
 ```bash
@@ -698,11 +780,25 @@ write:
 
 # Execution settings
 execution:
+  priority: 5
   max_retries: 3
   retry_delay_seconds: 1.0
+  retry_max_delay_seconds: 60
   timeout_seconds: 60
+  consistency_mode: eventual # eventual, strict_post_commit, shadow
+  require_document_hash_match: false
+  max_concurrency: 1         # Optional per-agent in-process concurrency cap
   rate_limit_requests: 100    # Per minute
   cost_limit_usd: 10.0        # Planned per-agent limit (field exists; runtime enforcement not enabled yet)
+
+# Optional declarative policy guardrail
+policy:
+  condition: result.risk_score > 0.8
+  action: block               # enrich, block, tag
+  fallback_action: enrich     # skip, enrich
+  simulation_mode: false
+  tag_field: policy_tag       # used when action=tag
+  tag_value: matched
 
 # Enable/disable
 enabled: true
@@ -786,12 +882,125 @@ MONGOCLAW_API__HOST=0.0.0.0
 MONGOCLAW_API__PORT=8000
 
 # Workers
-MONGOCLAW_WORKER__CONCURRENCY=10
+MONGOCLAW_WORKER__POOL_SIZE=10
+MONGOCLAW_WORKER__ROUTING_STRATEGY=by_agent
+MONGOCLAW_WORKER__ROUTING_PARTITION_COUNT=8
+MONGOCLAW_WORKER__FAIR_SCHEDULING_ENABLED=true
+MONGOCLAW_WORKER__FAIR_STREAM_BATCH_SIZE=1
+MONGOCLAW_WORKER__FAIR_STREAMS_PER_CYCLE=10
+MONGOCLAW_WORKER__MAX_IN_FLIGHT_PER_AGENT_STREAM=50
+MONGOCLAW_WORKER__PENDING_METRICS_INTERVAL_SECONDS=10
+MONGOCLAW_WORKER__STARVATION_CYCLE_THRESHOLD=20
+MONGOCLAW_WORKER__DISPATCH_BACKPRESSURE_ENABLED=true
+MONGOCLAW_WORKER__DISPATCH_BACKPRESSURE_THRESHOLD=0.8
+MONGOCLAW_WORKER__DISPATCH_OVERFLOW_POLICY=defer # drop|defer|dlq
+MONGOCLAW_WORKER__DISPATCH_MIN_PRIORITY_WHEN_BACKPRESSURED=5
+MONGOCLAW_WORKER__DISPATCH_DEFER_SECONDS=0.25
+MONGOCLAW_WORKER__DISPATCH_DEFER_MAX_ATTEMPTS=3
+MONGOCLAW_WORKER__DISPATCH_PRESSURE_CACHE_TTL_SECONDS=1
+MONGOCLAW_WORKER__AGENT_ERROR_BUDGET_WINDOW_SECONDS=60
+MONGOCLAW_WORKER__AGENT_ERROR_BUDGET_MAX_FAILURES=20
+MONGOCLAW_WORKER__AGENT_QUARANTINE_SECONDS=30
+MONGOCLAW_WORKER__LATENCY_SLO_MS=3000
 
 # Observability
 MONGOCLAW_OBSERVABILITY__LOG_LEVEL=INFO
 MONGOCLAW_OBSERVABILITY__LOG_FORMAT=json|console
 MONGOCLAW_OBSERVABILITY__METRICS_ENABLED=true
+```
+
+---
+
+## Production Presets
+
+Use these as starting profiles, then tune with your own latency/cost/error SLOs.
+
+### Preset A: High Throughput Enrichment (Recommended Default)
+
+Best for: support tickets, catalog tagging, content enrichment where maximum coverage matters more than strict write ordering.
+
+Agent execution:
+```yaml
+execution:
+  consistency_mode: eventual
+  timeout_seconds: 12
+  max_retries: 2
+  retry_delay_seconds: 1
+  retry_max_delay_seconds: 8
+  max_concurrency: 8
+  require_document_hash_match: false
+```
+
+Worker/runtime:
+```bash
+MONGOCLAW_WORKER__POOL_SIZE=16
+MONGOCLAW_WORKER__FAIR_SCHEDULING_ENABLED=true
+MONGOCLAW_WORKER__MAX_IN_FLIGHT_PER_AGENT_STREAM=100
+MONGOCLAW_WORKER__DISPATCH_BACKPRESSURE_ENABLED=true
+MONGOCLAW_WORKER__DISPATCH_OVERFLOW_POLICY=defer
+MONGOCLAW_WORKER__LATENCY_SLO_MS=3000
+```
+
+### Preset B: Strict Correctness / Compliance
+
+Best for: financial/compliance-adjacent flows where stale writes must be blocked.
+
+Agent execution:
+```yaml
+execution:
+  consistency_mode: strict_post_commit
+  require_document_hash_match: true
+  timeout_seconds: 20
+  max_retries: 1
+  retry_delay_seconds: 2
+  retry_max_delay_seconds: 8
+  max_concurrency: 2
+```
+
+Worker/runtime:
+```bash
+MONGOCLAW_WORKER__POOL_SIZE=8
+MONGOCLAW_WORKER__DISPATCH_BACKPRESSURE_ENABLED=true
+MONGOCLAW_WORKER__DISPATCH_MIN_PRIORITY_WHEN_BACKPRESSURED=7
+MONGOCLAW_WORKER__DISPATCH_OVERFLOW_POLICY=defer
+MONGOCLAW_WORKER__AGENT_ERROR_BUDGET_MAX_FAILURES=10
+MONGOCLAW_WORKER__AGENT_QUARANTINE_SECONDS=60
+MONGOCLAW_WORKER__LATENCY_SLO_MS=4000
+```
+
+### Preset C: Shadow Rollout / Safe Introduction
+
+Best for: validating new prompts/models before enabling writeback.
+
+Agent execution:
+```yaml
+execution:
+  consistency_mode: shadow
+  timeout_seconds: 10
+  max_retries: 1
+```
+
+Recommended process:
+1. Run in `shadow` and inspect `executions` (`status`, `lifecycle_state`, `reason`).
+2. Fix prompt/schema issues and reduce `pipeline_error` rate.
+3. Promote to `eventual` or `strict_post_commit` based on business correctness requirements.
+
+---
+
+## Testing
+
+### Unit + Integration Tests
+
+Install dev dependencies (includes `pytest`):
+
+```bash
+uv sync --extra dev
+```
+
+Run test suite:
+
+```bash
+uv run pytest -q
 ```
 
 ---
