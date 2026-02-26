@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mongoclaw.core.types import ChangeEvent, ChangeOperation
 from mongoclaw.observability.logging import get_logger
+from mongoclaw.observability.metrics import get_metrics_collector
 
 if TYPE_CHECKING:
     from mongoclaw.agents.models import AgentConfig
@@ -79,6 +80,20 @@ class EventMatcher:
                 watch_ops=[op.value for op in watch.operations],
             )
             return False
+
+        # Loop guard: ignore events that were previously mutated by the same agent.
+        if event.full_document:
+            metadata_field = agent.write.metadata_field or "_ai_metadata"
+            metadata = event.full_document.get(metadata_field)
+            if isinstance(metadata, dict) and metadata.get("source_agent_id") == agent.id:
+                get_metrics_collector().record_loop_guard_skip(agent.id)
+                logger.debug(
+                    "Loop guard skip",
+                    agent_id=agent.id,
+                    document_id=event.document_id,
+                    metadata_field=metadata_field,
+                )
+                return False
 
         # Check document filter
         if watch.filter and event.full_document:

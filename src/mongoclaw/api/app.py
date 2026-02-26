@@ -80,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     setup_middleware(app)
 
     # Include routers
-    from mongoclaw.api.v1 import agents, executions, health, webhooks
+    from mongoclaw.api.v1 import agents, catalog, executions, health, webhooks
 
     app.include_router(
         health.router,
@@ -97,6 +97,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         executions.router,
         prefix="/api/v1/executions",
         tags=["Executions"],
+    )
+
+    app.include_router(
+        catalog.router,
+        prefix="/api/v1/catalog",
+        tags=["Catalog"],
     )
 
     app.include_router(

@@ -26,6 +26,7 @@ class AgentValidator:
         "mistral": [r"mistral-.*", r"mixtral-.*"],
         "ollama": [r".*"],  # Ollama supports any model name
         "together": [r".*"],  # Together supports various models
+        "external": [r".*"],  # External agent endpoint integration
     }
 
     # Reserved field names that should not be used in write configs
@@ -119,6 +120,13 @@ class AgentValidator:
                 errors.append(
                     f"Model '{ai.model}' may not be valid for provider '{ai.provider}'. "
                     f"Expected patterns: {patterns}"
+                )
+
+        if provider == "external":
+            external_url = ai.extra_params.get("external_url") if isinstance(ai.extra_params, dict) else None
+            if not external_url:
+                errors.append(
+                    "external provider requires ai.extra_params.external_url"
                 )
 
         # Validate prompt template

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +15,7 @@ from mongoclaw.agents.models import AgentConfig, WriteConfig
 from mongoclaw.core.exceptions import IdempotencyError, WriteConflictError
 from mongoclaw.core.types import AIResponse, WriteStrategy
 from mongoclaw.observability.logging import get_logger
+from mongoclaw.observability.metrics import get_metrics_collector
 from mongoclaw.result.strategies import WriteStrategyHandler
 
 logger = get_logger(__name__)
@@ -72,7 +75,11 @@ class ResultWriter:
         ai_response: AIResponse,
         work_item_id: str,
         idempotency_key: str | None = None,
-    ) -> bool:
+        source_version: int | None = None,
+        enforce_strict_version: bool = False,
+        source_document_hash: str | None = None,
+        enforce_document_hash: bool = False,
+    ) -> tuple[bool, str]:
         """
         Write AI result to MongoDB.
 
@@ -82,9 +89,11 @@ class ResultWriter:
             ai_response: The AI response with parsed content.
             work_item_id: The work item ID for tracking.
             idempotency_key: Optional idempotency key.
+            source_version: Dispatch-time `_mongoclaw_version` value, if known.
+            enforce_strict_version: Whether to enforce optimistic version checks.
 
         Returns:
-            True if write was successful.
+            Tuple of (was_written, reason_code).
 
         Raises:
             IdempotencyError: If idempotency check fails.
@@ -101,7 +110,7 @@ class ResultWriter:
                     document_id=document_id,
                     idempotency_key=idempotency_key,
                 )
-                return False
+                return False, "idempotency_duplicate"
 
         # Get target database and collection
         target_db = write_config.target_database or agent.watch.database
@@ -110,22 +119,56 @@ class ResultWriter:
 
         # Build update document
         parsed_content = ai_response.parsed_content or {"content": ai_response.content}
-        update = self._build_update(write_config, parsed_content, ai_response, work_item_id)
+        update = self._build_update(
+            write_config=write_config,
+            parsed_content=parsed_content,
+            ai_response=ai_response,
+            work_item_id=work_item_id,
+            agent_id=agent.id,
+            increment_version=enforce_strict_version,
+        )
+        filter_doc = self._build_update_filter(
+            document_id=document_id,
+            source_version=source_version,
+            enforce_strict_version=enforce_strict_version,
+        )
+        if enforce_document_hash and source_document_hash:
+            if not await self._matches_source_hash(
+                collection=collection,
+                document_id=document_id,
+                expected_hash=source_document_hash,
+            ):
+                get_metrics_collector().record_hash_conflict(agent.id)
+                logger.warning(
+                    "Strict consistency blocked hash-mismatched write",
+                    agent_id=agent.id,
+                    document_id=document_id,
+                )
+                return False, "hash_conflict"
 
         try:
             # Perform update
             result = await collection.update_one(
-                {"_id": self._parse_document_id(document_id)},
+                filter_doc,
                 update,
             )
 
             if result.matched_count == 0:
+                if enforce_strict_version:
+                    get_metrics_collector().record_version_conflict(agent.id)
+                    logger.warning(
+                        "Strict consistency blocked stale write",
+                        agent_id=agent.id,
+                        document_id=document_id,
+                        source_version=source_version,
+                    )
+                    return False, "strict_version_conflict"
                 logger.warning(
                     "Document not found for update",
                     agent_id=agent.id,
                     document_id=document_id,
                 )
-                return False
+                return False, "document_not_found"
 
             # Record idempotency key
             if idempotency_key:
@@ -138,7 +181,7 @@ class ResultWriter:
                 modified=result.modified_count > 0,
             )
 
-            return True
+            return True, "written"
 
         except DuplicateKeyError as e:
             raise WriteConflictError(target_coll, document_id)
@@ -152,12 +195,29 @@ class ResultWriter:
             )
             raise
 
+    async def _matches_source_hash(
+        self,
+        collection: AsyncIOMotorCollection[dict[str, Any]],
+        document_id: str,
+        expected_hash: str,
+    ) -> bool:
+        """Validate current document hash against dispatch-time hash."""
+        current = await collection.find_one(
+            {"_id": self._parse_document_id(document_id)}
+        )
+        if current is None:
+            return False
+        current_hash = self._stable_document_hash(current)
+        return current_hash == expected_hash
+
     def _build_update(
         self,
         write_config: WriteConfig,
         parsed_content: dict[str, Any],
         ai_response: AIResponse,
         work_item_id: str,
+        agent_id: str | None = None,
+        increment_version: bool = False,
     ) -> dict[str, Any]:
         """Build the MongoDB update document."""
         # Map fields if configured
@@ -169,6 +229,10 @@ class ResultWriter:
             content = mapped_content
         else:
             content = parsed_content
+
+        # Optionally nest output under a single target field.
+        if write_config.target_field:
+            content = {write_config.target_field: content}
 
         # Build update based on strategy
         update = self._strategy_handler.build_update(
@@ -183,6 +247,8 @@ class ResultWriter:
             metadata = {
                 "processed_at": datetime.utcnow(),
                 "work_item_id": work_item_id,
+                "source_work_item_id": work_item_id,
+                "source_agent_id": agent_id,
                 "model": ai_response.model,
                 "provider": ai_response.provider,
                 "tokens": ai_response.total_tokens,
@@ -196,7 +262,32 @@ class ResultWriter:
             else:
                 update["$set"] = {metadata_field: metadata}
 
+        if increment_version:
+            update.setdefault("$inc", {})
+            update["$inc"]["_mongoclaw_version"] = 1
+
         return update
+
+    def _build_update_filter(
+        self,
+        document_id: str,
+        source_version: int | None,
+        enforce_strict_version: bool,
+    ) -> dict[str, Any]:
+        """Build update filter with optional strict version guard."""
+        base_filter: dict[str, Any] = {"_id": self._parse_document_id(document_id)}
+        if not enforce_strict_version:
+            return base_filter
+
+        expected_version = 0 if source_version is None else source_version
+        if expected_version == 0:
+            base_filter["$or"] = [
+                {"_mongoclaw_version": 0},
+                {"_mongoclaw_version": {"$exists": False}},
+            ]
+        else:
+            base_filter["_mongoclaw_version"] = expected_version
+        return base_filter
 
     def _parse_document_id(self, document_id: str) -> Any:
         """Parse document ID to appropriate type."""
@@ -210,6 +301,29 @@ class ResultWriter:
                 pass
 
         return document_id
+
+    def _stable_document_hash(self, document: dict[str, Any]) -> str:
+        """Compute stable hash excluding mutable framework metadata."""
+        normalized = self._normalize_for_hash(document)
+        serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode()).hexdigest()
+
+    def _normalize_for_hash(self, value: Any) -> Any:
+        """Normalize value recursively to a hash-stable representation."""
+        if isinstance(value, dict):
+            ignored = {"_ai_metadata", "_mongoclaw_version"}
+            return {
+                k: self._normalize_for_hash(v)
+                for k, v in value.items()
+                if k not in ignored
+            }
+        if isinstance(value, list):
+            return [self._normalize_for_hash(v) for v in value]
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
 
     async def _check_idempotency(self, key: str) -> bool:
         """Check if an idempotency key exists."""

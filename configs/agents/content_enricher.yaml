@@ -1,0 +1,20 @@
+id: content_enricher
+name: Content Enricher
+
+watch:
+  database: content
+  collection: articles
+  operations: [insert, update]
+
+ai:
+  provider: custom
+  model: openrouter/openai/gpt-4o-mini
+  prompt: |
+    Summarize and extract entities from:
+    {{ document.body }}
+
+write:
+  strategy: merge
+  target_field: ai_content
+
+enabled: true

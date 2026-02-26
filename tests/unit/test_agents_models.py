@@ -84,8 +84,10 @@ class TestWriteConfig:
         """Test creating a valid write config."""
         config = WriteConfig(
             strategy="merge",
+            target_field="ai_classification",
         )
         assert config.strategy == WriteStrategy.MERGE
+        assert config.target_field == "ai_classification"
 
     def test_merge_strategy(self):
         """Test merge write strategy."""
@@ -129,6 +131,29 @@ class TestExecutionConfig:
         assert config.max_retries == 5
         assert config.retry_delay_seconds == 2.0
         assert config.cost_limit_usd == 1.0
+
+    def test_max_concurrency(self):
+        """Test per-agent max concurrency config."""
+        config = ExecutionConfig(max_concurrency=2)
+        assert config.max_concurrency == 2
+
+        with pytest.raises(ValidationError):
+            ExecutionConfig(max_concurrency=0)
+
+
+class TestPolicyConfig:
+    """Tests for policy config nested under AgentConfig."""
+
+    def test_policy_config_on_agent(self, sample_agent_config):
+        """Test policy block is parsed and stored."""
+        sample_agent_config["policy"] = {
+            "condition": "result.risk_score > 0.8",
+            "action": "block",
+            "fallback_action": "enrich",
+        }
+        agent = AgentConfig(**sample_agent_config)
+        assert agent.policy is not None
+        assert agent.policy.action == "block"
 
 
 class TestAgentConfig:

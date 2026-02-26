@@ -43,6 +43,9 @@ class ExecutionRecord(BaseModel):
     agent_id: str
     document_id: str
     status: str
+    lifecycle_state: str | None = None
+    reason: str | None = None
+    written: bool | None = None
     started_at: datetime
     completed_at: datetime | None = None
     duration_ms: float | None = None
@@ -95,7 +98,7 @@ class MongoClawClient:
         if self._client is None:
             headers = {}
             if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
+                headers["X-API-Key"] = self.api_key
 
             self._client = httpx.Client(
                 base_url=self.base_url,
@@ -121,6 +124,14 @@ class MongoClawClient:
         response = client.request(method, path, **kwargs)
         response.raise_for_status()
         return response
+
+    @staticmethod
+    def _unwrap_agent_payload(data: dict[str, Any]) -> dict[str, Any]:
+        """Unwrap API responses of shape {success, agent, message}."""
+        agent_payload = data.get("agent")
+        if isinstance(agent_payload, dict):
+            return agent_payload
+        return data
 
     # Health endpoints
 
@@ -191,7 +202,9 @@ class MongoClawClient:
             Created agent details.
         """
         response = self._request("POST", "/api/v1/agents", json=config)
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        return AgentDetails(**agent_data)
 
     def update_agent(
         self,
@@ -212,7 +225,9 @@ class MongoClawClient:
             f"/api/v1/agents/{agent_id}",
             json=config,
         )
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        return AgentDetails(**agent_data)
 
     def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent.
@@ -224,7 +239,15 @@ class MongoClawClient:
             True if deleted successfully.
         """
         response = self._request("DELETE", f"/api/v1/agents/{agent_id}")
-        return response.status_code == 204
+        if response.status_code in (200, 202, 204):
+            return True
+
+        # Fallback for non-standard success payloads.
+        try:
+            data = response.json()
+            return bool(data.get("success"))
+        except Exception:
+            return False
 
     def enable_agent(self, agent_id: str) -> AgentDetails:
         """Enable an agent.
@@ -236,7 +259,11 @@ class MongoClawClient:
             Updated agent details.
         """
         response = self._request("POST", f"/api/v1/agents/{agent_id}/enable")
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        if not isinstance(agent_data, dict) or "id" not in agent_data:
+            return self.get_agent(agent_id)
+        return AgentDetails(**agent_data)
 
     def disable_agent(self, agent_id: str) -> AgentDetails:
         """Disable an agent.
@@ -248,7 +275,11 @@ class MongoClawClient:
             Updated agent details.
         """
         response = self._request("POST", f"/api/v1/agents/{agent_id}/disable")
-        return AgentDetails(**response.json())
+        data = response.json()
+        agent_data = self._unwrap_agent_payload(data)
+        if not isinstance(agent_data, dict) or "id" not in agent_data:
+            return self.get_agent(agent_id)
+        return AgentDetails(**agent_data)
 
     def validate_agent(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate an agent configuration.

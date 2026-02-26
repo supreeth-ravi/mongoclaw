@@ -1,0 +1,29 @@
+id: method_shadow_agent
+name: Method Shadow Agent
+watch:
+  database: support_shadow
+  collection: tickets
+  operations: [insert]
+  filter:
+    status: open
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Shadow analyze:
+    {{ document.title }}
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+      priority:
+        type: string
+    required: [category, priority]
+  extra_params:
+    mock_response: '{"category":"shadow","priority":"low"}'
+write:
+  strategy: merge
+enabled: true
+execution:
+  consistency_mode: shadow

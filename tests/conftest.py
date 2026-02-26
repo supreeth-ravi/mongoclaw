@@ -10,8 +10,8 @@ import pytest
 import pytest_asyncio
 
 
-# Set test environment
-os.environ.setdefault("MONGOCLAW_ENVIRONMENT", "test")
+# Set test environment (must match allowed Settings literals)
+os.environ.setdefault("MONGOCLAW_ENVIRONMENT", "development")
 os.environ.setdefault("MONGOCLAW_MONGODB_URI", "mongodb://localhost:27017/mongoclaw_test")
 os.environ.setdefault("MONGOCLAW_REDIS_URL", "redis://localhost:6379/1")
 

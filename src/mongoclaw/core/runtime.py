@@ -251,11 +251,13 @@ class Runtime:
         logger.debug("Initializing dispatcher")
 
         from mongoclaw.dispatcher.agent_dispatcher import AgentDispatcher
+        from mongoclaw.dispatcher.routing import RoutingStrategy
 
         self._dispatcher = AgentDispatcher(
             agent_store=self._agent_store,
             queue_backend=self._queue_backend,
             settings=self._settings,
+            routing_strategy=RoutingStrategy(self._settings.worker.routing_strategy),
         )
 
     async def _init_worker_pool(self) -> None:
@@ -263,11 +265,13 @@ class Runtime:
         logger.debug("Initializing worker pool")
 
         from mongoclaw.worker.pool import WorkerPool
+        from mongoclaw.dispatcher.routing import RoutingStrategy
 
         self._worker_pool = WorkerPool(
             queue_backend=self._queue_backend,
             agent_store=self._agent_store,
             settings=self._settings,
+            routing_strategy=RoutingStrategy(self._settings.worker.routing_strategy),
             mongo_client=self._mongo_client,
         )
 

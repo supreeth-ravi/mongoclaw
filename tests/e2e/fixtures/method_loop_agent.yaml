@@ -1,0 +1,26 @@
+id: method_loop_agent
+name: Method Loop Guard Agent
+watch:
+  database: support_loop
+  collection: tickets
+  operations: [insert, update]
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Analyze:
+    Title: {{ document.title }}
+    Description: {{ document.description }}
+  response_schema:
+    type: object
+    properties:
+      category:
+        type: string
+      priority:
+        type: string
+    required: [category, priority]
+  extra_params:
+    mock_response: '{"category":"loop-test","priority":"medium"}'
+write:
+  strategy: merge
+enabled: true

@@ -1,0 +1,31 @@
+id: method_policy_agent
+name: Method Policy Agent
+watch:
+  database: support_policy
+  collection: tickets
+  operations: [insert]
+ai:
+  provider: openai
+  model: gpt-4o-mini
+  prompt: |
+    Evaluate:
+    Title: {{ document.title }}
+    Amount: {{ document.amount }}
+  response_schema:
+    type: object
+    properties:
+      risk_score:
+        type: number
+      reason:
+        type: string
+    required: [risk_score, reason]
+  extra_params:
+    mock_response: '{"risk_score":0.95,"reason":"high amount"}'
+write:
+  strategy: merge
+  target_field: ai_classification
+policy:
+  condition: result.risk_score > 0.8
+  action: block
+  fallback_action: enrich
+enabled: true

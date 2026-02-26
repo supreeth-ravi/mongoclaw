@@ -53,6 +53,8 @@ class ChangeStreamWatcher:
         self._running = False
         self._streams: dict[str, AsyncIOMotorChangeStream[dict[str, Any]]] = {}
         self._watch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._refresh_task: asyncio.Task[None] | None = None
+        self._agent_watch_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
 
     @property
@@ -79,6 +81,14 @@ class ChangeStreamWatcher:
 
         # Start watches for all configured targets
         await self.refresh_watches()
+        self._refresh_task = asyncio.create_task(
+            self._refresh_loop(),
+            name="watch_refresh_loop",
+        )
+        self._agent_watch_task = asyncio.create_task(
+            self._watch_agent_configs(),
+            name="agent_config_watch_loop",
+        )
 
         logger.info("Change stream watcher started")
 
@@ -97,6 +107,16 @@ class ChangeStreamWatcher:
 
         if self._watch_tasks:
             await asyncio.gather(*self._watch_tasks.values(), return_exceptions=True)
+
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            await asyncio.gather(self._refresh_task, return_exceptions=True)
+            self._refresh_task = None
+
+        if self._agent_watch_task is not None:
+            self._agent_watch_task.cancel()
+            await asyncio.gather(self._agent_watch_task, return_exceptions=True)
+            self._agent_watch_task = None
 
         # Close all streams
         for stream in self._streams.values():
@@ -125,12 +145,48 @@ class ChangeStreamWatcher:
             db, coll = ns.split(".", 1)
             await self._start_watch(db, coll)
 
-        logger.info(
+        log_fn = logger.info if to_add or to_remove else logger.debug
+        log_fn(
             "Refreshed watches",
             total=len(new_targets),
             added=len(to_add),
             removed=len(to_remove),
         )
+
+    async def _refresh_loop(self) -> None:
+        """Periodically refresh watch targets while runtime is running."""
+        while self._running:
+            try:
+                await asyncio.sleep(5)
+                await self.refresh_watches()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Watch refresh loop error", error=str(e))
+
+    async def _watch_agent_configs(self) -> None:
+        """Watch the agents collection and refresh watches on config changes."""
+        db_name = self._settings.mongodb.database
+        coll_name = self._settings.mongodb.agents_collection
+        ns = f"{db_name}.{coll_name}"
+        coll = self._client[db_name][coll_name]
+
+        while self._running:
+            try:
+                async with coll.watch() as stream:
+                    logger.info("Agent config watch opened", namespace=ns)
+                    async for _ in stream:
+                        if not self._running:
+                            break
+                        await self.refresh_watches()
+            except asyncio.CancelledError:
+                break
+            except PyMongoError as e:
+                logger.warning("Agent config watch error", namespace=ns, error=str(e))
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning("Agent config watch loop error", namespace=ns, error=str(e))
+                await asyncio.sleep(1)
 
     async def _start_watch(self, database: str, collection: str) -> None:
         """Start watching a specific collection."""

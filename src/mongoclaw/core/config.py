@@ -123,10 +123,109 @@ class WorkerSettings(BaseSettings):
         ge=1,
         description="Number of concurrent workers",
     )
+    routing_strategy: Literal[
+        "by_agent",
+        "by_collection",
+        "single",
+        "partitioned",
+        "by_priority",
+    ] = Field(
+        default="by_agent",
+        description="Routing strategy for queue stream assignment",
+    )
+    routing_partition_count: int = Field(
+        default=8,
+        ge=1,
+        description="Number of partitions when routing_strategy=partitioned",
+    )
     batch_size: int = Field(
         default=10,
         ge=1,
         description="Number of items to dequeue at once",
+    )
+    fair_scheduling_enabled: bool = Field(
+        default=True,
+        description="Enable rotating fair scheduling across streams",
+    )
+    fair_stream_batch_size: int = Field(
+        default=1,
+        ge=1,
+        description="Items to pull per stream when fair scheduling is enabled",
+    )
+    fair_streams_per_cycle: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional cap on streams processed per worker cycle",
+    )
+    max_in_flight_per_agent_stream: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional global in-flight cap per agent stream across workers",
+    )
+    pending_metrics_interval_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description="How often to sample per-agent stream pending depth",
+    )
+    starvation_cycle_threshold: int = Field(
+        default=20,
+        ge=1,
+        description="Consecutive empty cycles before emitting starvation signal",
+    )
+    dispatch_backpressure_enabled: bool = Field(
+        default=True,
+        description="Enable queue-pressure admission control at dispatch time",
+    )
+    dispatch_backpressure_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Queue fullness threshold for dispatch backpressure actions",
+    )
+    dispatch_overflow_policy: Literal["drop", "defer", "dlq"] = Field(
+        default="defer",
+        description="Overflow behavior under dispatch backpressure",
+    )
+    dispatch_min_priority_when_backpressured: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        description="Minimum priority allowed to bypass backpressure",
+    )
+    dispatch_defer_seconds: float = Field(
+        default=0.25,
+        gt=0,
+        description="Delay between deferred admission checks",
+    )
+    dispatch_defer_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum defer checks before forced enqueue",
+    )
+    dispatch_pressure_cache_ttl_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        description="TTL for stream pressure sampling cache",
+    )
+    agent_error_budget_window_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        description="Window for per-agent failure budget accounting",
+    )
+    agent_error_budget_max_failures: int = Field(
+        default=20,
+        ge=1,
+        description="Failure count in window before temporary quarantine",
+    )
+    agent_quarantine_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Temporary quarantine duration after budget exhaustion",
+    )
+    latency_slo_ms: float = Field(
+        default=3000.0,
+        gt=0,
+        description="Latency SLO threshold in milliseconds",
     )
     max_retries: int = Field(default=3, ge=0)
     retry_base_delay: float = Field(default=1.0, gt=0)

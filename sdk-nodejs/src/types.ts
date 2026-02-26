@@ -65,7 +65,10 @@ export interface ExecutionRecord {
   id: string;
   agent_id: string;
   document_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  lifecycle_state?: string;
+  reason?: string;
+  written?: boolean;
   started_at: string;
   completed_at?: string;
   duration_ms?: number;
