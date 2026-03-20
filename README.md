@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/supreeth-ravi/mongoclaw/main/docs/images/mongoclaw.png" alt="MongoClaw Logo" width="200"/>
-</p>
-
 <h1 align="center">MongoClaw</h1>
 
 <h3 align="center"><em>A Clawbot army for every collection</em></h3>
